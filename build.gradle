@@ -1,0 +1,156 @@
+plugins {
+    // Java 编译（NeoForge 侧）
+    id 'java-library'
+    // Kotlin：Mod 源码是 Kotlin
+    id 'org.jetbrains.kotlin.jvm' version "${kotlin_version}"
+    // NeoForge 开发环境（Minecraft 依赖、运行配置、mods.toml 模板展开）
+    id 'net.neoforged.moddev' version '2.0.148'
+    id 'idea'
+}
+
+tasks.named('wrapper', Wrapper).configure {
+    distributionType = Wrapper.DistributionType.BIN
+}
+
+version = mod_version
+group = mod_group_id
+
+sourceSets.main.resources {
+    srcDir('src/generated/resources')
+    exclude("**/*.bbmodel")
+    exclude("src/generated/**/.cache")
+}
+
+base {
+    archivesName = mod_id
+}
+
+// Mojang 1.21.1 使用 Java 21
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+kotlin {
+    jvmToolchain(21)
+}
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
+        // KFF 自身也用这个标志；主流 mod 环境不需要显式 API 模式之外的东西
+        freeCompilerArgs.add('-Xjvm-default=all')
+    }
+}
+
+neoForge {
+    version = project.neo_version
+
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+
+    runs {
+        client {
+            client()
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            // 本地跑客户端时给足内存（CI 不跑 runClient，只 build）
+            gameDirectory = project.file('run')
+        }
+
+        server {
+            server()
+            programArgument '--nogui'
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            gameDirectory = project.file('run-server')
+        }
+
+        gameTestServer {
+            type = "gameTestServer"
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+
+        data {
+            data()
+            programArguments.addAll '--mod', project.mod_id, '--all',
+                    '--output', file('src/generated/resources/').getAbsolutePath(),
+                    '--existing', file('src/main/resources/').getAbsolutePath()
+        }
+
+        configureEach {
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+            logLevel = org.slf4j.event.Level.DEBUG
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet(sourceSets.main)
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+    // KotlinForForge
+    maven {
+        name = 'Kotlin for Forge'
+        url = 'https://thedarkcolour.github.io/KotlinForForge/'
+    }
+}
+
+configurations {
+    runtimeClasspath.extendsFrom localRuntime
+}
+
+dependencies {
+    // KotlinForForge：运行时提供 Kotlin 语言加载器 + stdlib；编译期提供 @Mod 的 Kotlin 语言支持
+    implementation "thedarkcolour:kotlinforforge-neoforge:${kff_version}"
+
+    // 纯逻辑层单测（chart/judge 不依赖 Minecraft，可在本机 JVM 跑）
+    testImplementation "org.junit.jupiter:junit-jupiter:5.11.4"
+    testImplementation "org.jetbrains.kotlin:kotlin-test-junit5:${kotlin_version}"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher:1.11.4"
+}
+
+tasks.named('test', Test).configure {
+    useJUnitPlatform()
+    // 纯逻辑单测只需要很小的堆；本机内存紧张
+    maxHeapSize = '512m'
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+    }
+}
+
+// 展开 neoforge.mods.toml 模板里的 ${...} 占位符
+var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
+    var replaceProperties = [
+            minecraft_version      : minecraft_version,
+            minecraft_version_range: minecraft_version_range,
+            neo_version            : neo_version,
+            loader_version_range   : loader_version_range,
+            kff_version            : kff_version,
+            kotlinforforge_version_range: kotlinforforge_version_range,
+            mod_id                 : mod_id,
+            mod_name               : mod_name,
+            mod_license            : mod_license,
+            mod_version            : mod_version,
+            mod_authors            : mod_authors,
+            mod_description        : mod_description,
+    ]
+    inputs.properties replaceProperties
+    expand replaceProperties
+    from "src/main/templates"
+    into "build/generated/sources/modMetadata"
+}
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+idea {
+    module {
+        downloadSources = true
+        downloadJavadoc = true
+    }
+}
