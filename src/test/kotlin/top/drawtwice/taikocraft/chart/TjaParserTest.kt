@@ -46,19 +46,20 @@ class TjaParserTest {
     }
 
     @Test
-    fun `空小节推进时间轴`() {
-        // Kotlin 的 split(",") 保留尾部空串：",," → ["", "", ""] = 3 个空小节
-        // （TJA 语义上逗号是小节分隔符，N 个逗号 = N+1 个小节）
+    fun `空小节推进时间轴 - 每个逗号推进一小节`() {
+        // 逐字符模型：逗号 = 小节结束，推进一整小节（16 div）
         val file = TjaParser.parse(tja(body = ",,"))
         val chart = file.charts[0]
-        assertEquals(3, chart.barLines.size)
-        assertEquals(6000.0, chart.barLines.last().timeMs, 0.001)
+        assertEquals(2, chart.barLines.size)
+        assertEquals(4000.0, chart.barLines.last().timeMs, 0.001)
         assertTrue(chart.notes.isEmpty())
 
+        // "1,1"：第 1 个字在 0ms；逗号后第 3 个字符（索引 2）在 1/3 行 + 1 小节
+        // 行共 3 字符 → 每字符 = 2000/3 ms；位置 = 2000（逗号推进）+ 2000/3
         val two = TjaParser.parse(tja(body = "1,1")).charts[0]
-        assertEquals(2, two.barLines.size)
-        assertEquals(2000.0, two.notes[1].timeMs, 0.001)
-        assertEquals(4000.0, two.barLines.last().timeMs, 0.001)
+        assertEquals(2, two.notes.size)
+        assertEquals(0.0, two.notes[0].timeMs, 0.001)
+        assertEquals(2000.0 + 2000.0 / 3.0, two.notes[1].timeMs, 0.5)
     }
 
     @Test
@@ -246,12 +247,33 @@ class TjaParserTest {
     }
 
     @Test
-    fun `内联 BPMCHANGE 从下一小节生效`() {
+    fun `内联 BPMCHANGE 从命令位置起生效`() {
+        // "11#BPMCHANGE 240,11"：数据部分是 "11"（nTextCount=2）
+        // 每字符 = 2000/2 = 1000ms；逗号推进 2000ms
+        // 之后 BPM=240，逗号推进 = 15000/240*16 = 1000ms
+        // 注意：本实现逗号推进用的是处理该字符时的当前 BPM
         val file = TjaParser.parse(tja(body = "11#BPMCHANGE 240,11"))
-        val chart = file.charts[0]
-        // 第一小节 2 音符 @120（间隔 1000ms），第二小节 @240（小节长 1000ms → 间隔 500ms）
-        val times = chart.notes.map { it.timeMs }
-        assertEquals(listOf(0.0, 1000.0, 2000.0, 2500.0), times)
+        val times = file.charts[0].notes.map { it.timeMs }
+        assertEquals(4, times.size)
+        assertEquals(0.0, times[0], 0.001)
+        assertEquals(1000.0, times[1], 0.001)
+        // 逗号用 240 BPM：1000ms
+        assertEquals(2000.0, times[2], 0.001)
+        // 第二行数据 "11"，nTextCount=2，每字符 1000/2=500ms
+        assertEquals(2500.0, times[3], 0.001)
+    }
+
+    @Test
+    fun `行尾注释被正确剥离`() {
+        // "1111,//55" → 数据部分 "1111,"（注释去掉）
+        // 若不剥离注释，"//55" 会被当成字符推进时间轴
+        val withComment = TjaParser.parse(tja(body = "1111,//55
+1111"))
+        val withoutComment = TjaParser.parse(tja(body = "1111,
+1111"))
+        val a = withComment.charts[0].notes.map { it.timeMs }
+        val b = withoutComment.charts[0].notes.map { it.timeMs }
+        assertEquals(b, a, "行尾注释不应影响时间轴")
     }
 
     @Test

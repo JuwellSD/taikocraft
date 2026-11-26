@@ -183,8 +183,11 @@ object TjaParser {
         val barLines = mutableListOf<BarLine>()
 
         var currentBpm = initialBpm
-        var measureLength = 4.0 / 4.0
-        var measureStart = 0.0
+        /** 拍号分子/分母（OpenTaiko 的 fNow_Measure_s / fNow_Measure_m），默认 4/4 */
+        var measureS = 4.0
+        var measureM = 4.0
+        /** 当前时间轴位置（不含 DELAY/OFFSET 的原始毫秒） */
+        var currentTimeMs = 0.0
         var delayMs = 0.0
         var balloonIndex = 0
 
@@ -209,9 +212,12 @@ object TjaParser {
                     upper.startsWith("#MEASURE") -> {
                         val parts = line.substringAfter("#MEASURE", "").trim().split('/')
                         if (parts.size == 2) {
-                            val n = parts[0].toDoubleOrNull()
+                            val s = parts[0].toDoubleOrNull()
                             val m = parts[1].toDoubleOrNull()
-                            if (n != null && m != null && m != 0.0) measureLength = n / m
+                            if (s != null && m != null && m != 0.0 && s > 0) {
+                                measureS = s
+                                measureM = m
+                            }
                         }
                     }
                     upper.startsWith("#DELAY") ->
@@ -226,59 +232,73 @@ object TjaParser {
 
             if (branchDepth > 0 && activeBranch != 'N') continue
 
-            // 逐“小节片段”推进时间轴。
-            // 注意：小节时长必须在处理片段之前用「当前」BPM/拍号算出来，
-            // 内联 `#BPMCHANGE` 从本片段之后（即下一条片段）才生效。
-            val measures = line.split(',')
-            var cursor = measureStart
-            for (measure in measures) {
-                val measureDuration = 240000.0 / currentBpm * measureLength
-                val mStart = cursor
-                cursor += measureDuration
+            // ==================================================================
+            // 逐字符推进时间轴（对齐 OpenTaiko 的 GotoNextDiv）
+            //
+            // OpenTaiko：每处理一个字符后
+            //   GotoNextDiv(nTextCount) → now += 15000/BPM × (s/m) × (16 / nTextCount)
+            // 遇到逗号时
+            //   GotoNextDiv(1)          → now += 15000/BPM × (s/m) × 16
+            //
+            // 关键：nTextCount 是**本行字符总数**（含逗号），不是小节数。
+            // 早期版本用 `split(',')` 后按小节索引插值，导致时间轴平均偏差 372ms、
+            // 最大 760ms 且随歌曲累积 —— 这就是「谱面严重不对」的根因。
+            // ==================================================================
+            val lineNoComment = line.substringBefore("//") // 行尾注释也要去掉
+            if (lineNoComment.isEmpty()) continue
 
-                val cleaned = stripInlineCommands(
-                    measure.trim(),
+            // 内联命令：`#BPMCHANGE 150` 出现在一行中间时，从该点起生效，后面内容不参与本行
+            val inlineIdx = lineNoComment.indexOf('#')
+            val dataPart = if (inlineIdx >= 0) {
+                applyInlineCommand(lineNoComment.substring(inlineIdx),
                     onBpm = { currentBpm = it },
-                    onMeasureLength = { measureLength = it },
-                )
-                if (cleaned.isEmpty()) {
-                    // 空小节也要记小节线并推进时间
-                    barLines += BarLine(toAudioTime(cursor))
+                    onMeasure = { s, m -> measureS = s; measureM = m })
+                lineNoComment.substring(0, inlineIdx)
+            } else lineNoComment
+
+            val nTextCount = dataPart.length
+            if (nTextCount == 0) continue
+
+            // 1 个 16 分格 = 15000/BPM × (s/m) ms；1 小节 = 16 格
+            val divMs = 15000.0 / currentBpm * (measureS / measureM)  // 16 分音符时长
+            val measureMs = divMs * 16.0                              // 整小节时长
+
+            for (ch in dataPart) {
+                if (ch == ',') {
+                    currentTimeMs += measureMs
+                    barLines += BarLine(toAudioTime(currentTimeMs))
                     continue
                 }
+                if (ch == '#') break
+                if (ch.isWhitespace()) continue
 
-                val n = cleaned.length
-                for ((i, ch) in cleaned.withIndex()) {
-                    val time = toAudioTime(mStart + measureDuration * i / n)
-                    when (ch) {
-                        '1' -> notes += Note(time, NoteColor.DON)
-                        '2' -> notes += Note(time, NoteColor.KA)
-                        '3' -> notes += Note(time, NoteColor.DON, big = true)
-                        '4' -> notes += Note(time, NoteColor.KA, big = true)
-                        'A' -> notes += Note(time, NoteColor.DON, big = true, player = 2)
-                        'B' -> notes += Note(time, NoteColor.KA, big = true, player = 2)
-                        '5' -> { openRollStart = time; openRollBig = false }
-                        '6' -> { openRollStart = time; openRollBig = true }
-                        '7', '9' -> openBalloonStart = time
-                        '8' -> {
-                            if (!openRollStart.isNaN()) {
-                                rolls += RollSegment(openRollStart, time, openRollBig)
-                                openRollStart = Double.NaN
-                            } else if (!openBalloonStart.isNaN()) {
-                                val required = balloonField.getOrNull(balloonIndex) ?: 5
-                                balloonIndex++
-                                balloonSegments += BalloonSegment(openBalloonStart, time, required)
-                                openBalloonStart = Double.NaN
-                            }
+                val time = toAudioTime(currentTimeMs)
+                when (ch) {
+                    '1' -> notes += Note(time, NoteColor.DON)
+                    '2' -> notes += Note(time, NoteColor.KA)
+                    '3' -> notes += Note(time, NoteColor.DON, big = true)
+                    '4' -> notes += Note(time, NoteColor.KA, big = true)
+                    'A' -> notes += Note(time, NoteColor.DON, big = true, player = 2)
+                    'B' -> notes += Note(time, NoteColor.KA, big = true, player = 2)
+                    '5' -> { openRollStart = time; openRollBig = false }
+                    '6' -> { openRollStart = time; openRollBig = true }
+                    '7', '9' -> openBalloonStart = time
+                    '8' -> {
+                        if (!openRollStart.isNaN()) {
+                            rolls += RollSegment(openRollStart, time, openRollBig)
+                            openRollStart = Double.NaN
+                        } else if (!openBalloonStart.isNaN()) {
+                            val required = balloonField.getOrNull(balloonIndex) ?: 5
+                            balloonIndex++
+                            balloonSegments += BalloonSegment(openBalloonStart, time, required)
+                            openBalloonStart = Double.NaN
                         }
-                        // '0' 空 / 'F' ADLIB / 'C' 地雷 / 'D' 导火索 / 'G' 紫：Phase 1 不生成音符
                     }
+                    // '0' 空 / 'F' ADLIB / 'C' 地雷 / 'D' 导火索 / 'G' 紫：暂不生成音符
                 }
-
-                // 每条小节末尾都记一条小节线（与音频时间轴对齐）
-                barLines += BarLine(toAudioTime(cursor))
+                // ★ 每处理一个字符推进一格（分母 = 本行字符总数）
+                currentTimeMs += divMs * (16.0 / nTextCount)
             }
-            measureStart = cursor
         }
 
         return Chart(
@@ -295,39 +315,27 @@ object TjaParser {
     }
 
     /**
-     * 去掉小节片段里的内联命令（`#BPMCHANGE` / `#MEASURE`），保留音符字符。
-     * 命令到本片段末尾为止的内容都丢弃（含其后的文字参数）。
+     * 应用行内命令（行中出现的 `#BPMCHANGE` / `#MEASURE`）。
+     * 只处理第一个命令，其余忽略（与 OpenTaiko 的 `isBpmChangeInsertedBeforeDiv` 简化等价）。
      */
-    private fun stripInlineCommands(
-        measure: String,
+    private fun applyInlineCommand(
+        rest: String,
         onBpm: (Double) -> Unit,
-        onMeasureLength: (Double) -> Unit,
-    ): String {
-        if (!measure.contains('#')) return measure
-        val sb = StringBuilder()
-        var i = 0
-        while (i < measure.length) {
-            if (measure[i] == '#') {
-                val rest = measure.substring(i)
-                val upper = rest.uppercase()
-                when {
-                    upper.startsWith("#BPMCHANGE") ->
-                        rest.substringAfter("#BPMCHANGE").trim().toDoubleOrNull()?.let(onBpm)
-                    upper.startsWith("#MEASURE") -> {
-                        val parts = rest.substringAfter("#MEASURE").trim().split('/')
-                        if (parts.size == 2) {
-                            val n = parts[0].toDoubleOrNull()
-                            val m = parts[1].toDoubleOrNull()
-                            if (n != null && m != null && m != 0.0) onMeasureLength(n / m)
-                        }
-                    }
+        onMeasure: (Double, Double) -> Unit,
+    ) {
+        val upper = rest.uppercase()
+        when {
+            upper.startsWith("#BPMCHANGE") ->
+                rest.substringAfter("#BPMCHANGE").trim().toDoubleOrNull()?.let(onBpm)
+            upper.startsWith("#MEASURE") -> {
+                val parts = rest.substringAfter("#MEASURE").trim().split('/')
+                if (parts.size == 2) {
+                    val s = parts[0].toDoubleOrNull()
+                    val m = parts[1].toDoubleOrNull()
+                    if (s != null && m != null && m != 0.0 && s > 0) onMeasure(s, m)
                 }
-                break // 命令之后视为行尾
             }
-            sb.append(measure[i])
-            i++
         }
-        return sb.toString()
     }
 
     private fun parseBalloonField(value: String?): List<Int> =
