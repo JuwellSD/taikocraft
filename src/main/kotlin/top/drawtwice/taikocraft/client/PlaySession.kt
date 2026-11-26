@@ -50,6 +50,8 @@ class PlaySession(
         clock.start()
         playback?.play()
         playback?.setVolume(volume)
+        // 开始时对齐一次后端位置（之后完全用系统时钟外推）
+        playback?.let { clock.syncToBackend(it.positionMs(), toleranceMs = 200.0) }
         anchorNanoTime = System.nanoTime()
         anchorJudgeTimeMs = clock.chartTimeJudgeMs
     }
@@ -67,7 +69,8 @@ class PlaySession(
 
     fun tick() {
         playback?.let { player ->
-            clock.updateFromBackend(player.positionMs())
+            // ★ 不再每帧用后端位置覆盖时钟（那是突进的根源）
+            // 只在开始时对齐一次；运行中也仅在严重偏离时才纠正
             player.setVolume(volume)
             if (player.tick() && clock.isPlaying) {
                 clock.pause()

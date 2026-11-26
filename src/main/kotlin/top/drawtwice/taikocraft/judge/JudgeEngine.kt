@@ -28,6 +28,9 @@ class JudgeEngine(
     private var nextNoteIndex = 0
     private val judged = BooleanArray(notes.size)
 
+    /** advanceTo 的游标：只前进不回头，避免每帧遍历全部音符 */
+    private var advanceCursor = 0
+
     private var nextBalloonIndex = 0
     private val balloonHits = IntArray(balloons.size)
 
@@ -152,30 +155,35 @@ class JudgeEngine(
     }
 
     private fun findBestCandidate(timeMs: Double): Pair<Int, Double>? {
-        // 窗口内的音符（已判定过的跳过）
-        // 用 nextNoteIndex 附近扫描：简单起见先线性扫（谱面长度一般 < 3000，判定频率低）
+        // 只在 [timeMs - poorMs, timeMs + poorMs] 窗口内找最近的未判定音符。
+        // notes 升序 → 二分定位窗口起点，只需扫很小一段。
         var bestIndex = -1
         var bestDelta = Double.MAX_VALUE
-        for ((i, note) in notes.withIndex()) {
-            if (judged[i]) continue
-            if (note.timeMs > timeMs + config.poorMs) break // 升序，后面的更远
-            val delta = timeMs - note.timeMs
-            if (abs(delta) < abs(bestDelta)) {
-                bestDelta = delta
-                bestIndex = i
-            }
-        }
-        // 允许击打早于音符（timeMs < note.timeMs）的窗口
-        if (bestIndex == -1) {
-            for ((i, note) in notes.withIndex()) {
-                if (judged[i]) continue
-                if (note.timeMs < timeMs - config.poorMs) continue
-                if (note.timeMs > timeMs + config.poorMs) break
+        var i = lowerBound(timeMs - config.poorMs)
+        while (i < notes.size) {
+            val note = notes[i]
+            if (note.timeMs > timeMs + config.poorMs) break
+            if (!judged[i]) {
                 val delta = timeMs - note.timeMs
-                if (abs(delta) < abs(bestDelta)) { bestDelta = delta; bestIndex = i }
+                if (abs(delta) < abs(bestDelta)) {
+                    bestDelta = delta
+                    bestIndex = i
+                }
             }
+            i++
         }
         return if (bestIndex == -1) null else bestIndex to bestDelta
+    }
+
+    /** 二分：第一个 timeMs >= target 的索引 */
+    private fun lowerBound(targetMs: Double): Int {
+        var lo = 0
+        var hi = notes.size
+        while (lo < hi) {
+            val mid = (lo + hi) ushr 1
+            if (notes[mid].timeMs < targetMs) lo = mid + 1 else hi = mid
+        }
+        return lo
     }
 
     private fun rollHit(roll: RollSegment, timeMs: Double) {
@@ -225,18 +233,28 @@ class JudgeEngine(
         maxCombo = maxOf(maxCombo, combo)
     }
 
-    /** 把 timeMs 之前已超出窗口的未判定音符标为 Miss */
+    /**
+     * 把 timeMs 之前已超出窗口的未判定音符标为 Miss。
+     *
+     * 性能：notes 按时间升序，用游标 [advanceCursor] 只前进不回头，
+     * 避免每帧遍历全部音符（888 音符 × 200fps 是明显的浪费）。
+     */
     fun advanceTo(audioTimeMs: Double) {
-        for ((i, note) in notes.withIndex()) {
+        while (advanceCursor < notes.size) {
+            val i = advanceCursor
+            val note = notes[i]
+            if (note.timeMs + config.poorMs >= audioTimeMs) break // 后面的都更晚，停
+            advanceCursor++
             if (judged[i]) continue
-            if (note.timeMs + config.poorMs < audioTimeMs) {
-                judged[i] = true
-                // 挂起的大音符过期算 Miss（另一半没来）
-                pendingBig.remove(i)
-                combo = 0
-            }
+            judged[i] = true
+            pendingBig.remove(i)
+            combo = 0
         }
-        // 连打/气球没有 Miss 概念，仅清理过期计数
+        // 清理已过期的大音符挂起项
+        if (pendingBig.isNotEmpty()) {
+            val expired = pendingBig.filterValues { audioTimeMs - it.firstTimeMs > config.bigPairWindowMs }
+            expired.keys.forEach { pendingBig.remove(it) }
+        }
     }
 
     fun isComplete(audioTimeMs: Double): Boolean {

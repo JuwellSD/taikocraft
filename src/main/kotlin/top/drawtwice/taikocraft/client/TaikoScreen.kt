@@ -70,28 +70,30 @@ class TaikoScreen(
         val notes = session.judge.notesSnapshot()
         debugVisibleNotes = 0
         val cy = trackTop + laneHeight / 2
-        for ((i, note) in notes.withIndex()) {
+
+        // ★ 性能：notes 按时间升序，用二分找到「第一个进入窗口的音符」，
+        //   只遍历窗口内的那几个，而不是全部 888 个（每帧 200fps × 888 = 17.7 万次循环）
+        val windowStartMs = now - visibleBehindMs
+        val windowEndMs = now + visibleAheadMs
+        var idx = lowerBound(notes, windowStartMs)
+        while (idx < notes.size) {
+            val noteIndex = idx
+            val note = notes[idx]
+            if (note.timeMs > windowEndMs) break
+            idx++
             if (note.player != 1) continue
 
             val deltaMs = note.timeMs - now
-            if (deltaMs > visibleAheadMs) continue
-            if (deltaMs < -visibleBehindMs) continue
-
             val x = judgeLineX + (deltaMs * pixelsPerMs).toInt()
             if (x < judgeLineX - 40 || x > trackRight + 40) continue
 
-            val judged = session.judge.isJudged(i)
+            val judged = session.judge.isJudged(noteIndex)
             val r = if (note.big) 15 else 11
             val baseColor = if (note.color == NoteColor.DON) donColor else kaColor
 
-            // 外层白圈（半径 r+3），内层实心（半径 r）
             drawDisc(guiGraphics, x, cy, r + 3, 0xFFFFFFFF.toInt())
-            drawDisc(
-                guiGraphics, x, cy, r,
-                if (judged) (baseColor and 0x40FFFFFF) else baseColor,
-            )
+            drawDisc(guiGraphics, x, cy, r, if (judged) (baseColor and 0x40FFFFFF) else baseColor)
             if (note.big) {
-                // 大音符：中心两个小白点
                 drawDisc(guiGraphics, x - 4, cy, 2, 0xFFFFFFFF.toInt())
                 drawDisc(guiGraphics, x + 4, cy, 2, 0xFFFFFFFF.toInt())
             }
@@ -165,14 +167,30 @@ class TaikoScreen(
         guiGraphics.drawString(font, "ESC 返回选曲", left, height - 18, 0xFF666666.toInt())
     }
 
-    /** 画实心圆：逐行 fill */
+    /** 二分：找到第一个 timeMs >= target 的索引 */
+    private fun lowerBound(notes: List<top.drawtwice.taikocraft.chart.Note>, targetMs: Double): Int {
+        var lo = 0
+        var hi = notes.size
+        while (lo < hi) {
+            val mid = (lo + hi) ushr 1
+            if (notes[mid].timeMs < targetMs) lo = mid + 1 else hi = mid
+        }
+        return lo
+    }
+
+    /**
+     * 画实心圆：逐行 fill，**纵向步长 2 像素**（视觉上几乎无差别，绘制调用减半）。
+     */
     private fun drawDisc(g: GuiGraphics, cx: Int, cy: Int, r: Int, color: Int) {
         if (r <= 0) return
         val r2 = r * r
-        for (dy in -r..r) {
+        var dy = -r
+        while (dy <= r) {
             val half = kotlin.math.sqrt((r2 - dy * dy).toDouble()).toInt()
-            if (half < 0) continue
-            g.fill(cx - half, cy + dy, cx + half + 1, cy + dy + 1, color)
+            if (half >= 0) {
+                g.fill(cx - half, cy + dy, cx + half + 1, cy + dy + 2, color)
+            }
+            dy += 2
         }
     }
 

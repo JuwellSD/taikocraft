@@ -4,6 +4,7 @@ import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.Component
+import top.drawtwice.taikocraft.audio.MetronomeSound
 import top.drawtwice.taikocraft.client.input.KeyInputBuffer
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -64,6 +65,8 @@ class CalibrationScreen(
         lastPulseAtMs = 0.0
         currentVisual = TaikoCraftClient.visualOffsetMs
         currentAudio = TaikoCraftClient.audioOffsetMs
+        MetronomeSound.init()
+        MetronomeSound.setVolume(1.0f)
 
         val cx = width / 2
         val by = height - 30
@@ -127,6 +130,8 @@ class CalibrationScreen(
         if (beatIndex != lastBeatIndex) {
             lastBeatIndex = beatIndex
             lastPulseAtMs = beatIndex * beatIntervalMs
+            // ★ 播放节拍音（音押校准的关键）
+            MetronomeSound.play(accent = (beatIndex % 4 == 0))
         }
         val sincePulse = nowMs - lastPulseAtMs
 
@@ -199,13 +204,12 @@ class CalibrationScreen(
             )
         }
 
-        // 模式提示（音押模式下提示用耳机）
         if (mode == Mode.AUDIO) {
             guiGraphics.drawCenteredString(
-                font, "提示：音押校准的理想做法是听着真实音乐游戏内微调；", cx, height - 60, 0xFF888888.toInt(),
+                font, "提示：戴耳机，闭眼，跟着听到的「嗒」声按", cx, height - 60, 0xFF888888.toInt(),
             )
             guiGraphics.drawCenteredString(
-                font, "本界面用系统节拍近似测量「反应延迟」，误差较大。", cx, height - 48, 0xFF888888.toInt(),
+                font, "每 4 拍一次重拍（音更高）", cx, height - 48, 0xFF888888.toInt(),
             )
         }
     }
