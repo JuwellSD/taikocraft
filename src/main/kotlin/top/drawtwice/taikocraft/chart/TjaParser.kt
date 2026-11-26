@@ -241,7 +241,11 @@ object TjaParser {
                     onBpm = { currentBpm = it },
                     onMeasureLength = { measureLength = it },
                 )
-                if (cleaned.isEmpty()) continue
+                if (cleaned.isEmpty()) {
+                    // 空小节也要记小节线并推进时间
+                    barLines += BarLine(toAudioTime(cursor))
+                    continue
+                }
 
                 val n = cleaned.length
                 for ((i, ch) in cleaned.withIndex()) {
