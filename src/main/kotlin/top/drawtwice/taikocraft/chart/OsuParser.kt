@@ -167,7 +167,7 @@ object OsuParser {
         val allowed = setOf("osu", "ogg", "mp3", "wav")
         val maxFileSize = 128L * 1024 * 1024 // 128MB
         val files = mutableMapOf<String, ByteArray>()
-        val beatmaps = mutableListOf<OsuBeatmap>()
+        val parsed = mutableListOf<Pair<String, OsuBeatmap>>() // .osu 路径 → 谱面
 
         ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
             var entry = zip.nextEntry
@@ -184,7 +184,7 @@ object OsuParser {
                             total += data.size
                             if (total > maxFileSize * 4) break // 包总体上限
                             if (ext == "osu") {
-                                beatmaps += parseOsu(TjaParser.decodeAny(data), name)
+                                parsed += name to parseOsu(TjaParser.decodeAny(data))
                             }
                         }
                     }
@@ -194,12 +194,21 @@ object OsuParser {
             }
         }
 
-        // 若 osu 里没写 AudioFilename，回退到包内第一个音频文件
-        val firstAudio = files.keys.firstOrNull { it.substringAfterLast('.', "").lowercase() in setOf("ogg", "mp3", "wav") }
-        val fixed = beatmaps.map { bm ->
-            if (bm.audioFileName.isNullOrBlank() && firstAudio != null) bm.copy(audioFileName = firstAudio) else bm
+        // AudioFilename 是相对 .osu 所在目录的 → 解析成 zip 内完整路径
+        val audioExts = setOf("ogg", "mp3", "wav")
+        val firstAudio = files.keys.firstOrNull { it.substringAfterLast('.', "").lowercase() in audioExts }
+        val beatmaps = parsed.map { (osuPath, bm) ->
+            val dir = osuPath.substringBeforeLast('/', "")
+            val declared = bm.audioFileName
+            val resolved = when {
+                declared.isNullOrBlank() -> null
+                declared in files -> declared
+                dir.isNotEmpty() && "$dir/$declared" in files -> "$dir/$declared"
+                else -> declared
+            } ?: firstAudio
+            bm.copy(audioFileName = resolved)
         }
-        return OszContents(fixed, files)
+        return OszContents(beatmaps, files)
     }
 
     private fun isSafePath(name: String): Boolean {
