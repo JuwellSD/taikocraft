@@ -179,9 +179,11 @@ class OpenAlPlayback private constructor(
                 throw IllegalStateException("OGG 解码失败（错误码 ${error[0]}）")
             }
             try {
-                val info = STBVorbis.stb_vorbis_get_info(decoder)
+                val info = org.lwjgl.stb.STBVorbisInfo.malloc()
+                STBVorbis.stb_vorbis_get_info(decoder, info)
                 val channels = info.channels()
                 val rate = info.sample_rate()
+                info.free()
                 val frames = STBVorbis.stb_vorbis_stream_length_in_samples(decoder)
                 val pcm = ShortBuffer.allocate(max(frames, 0) * channels)
                 val chunk = MemoryUtil.memAllocShort(CHUNK_FRAMES * channels)
