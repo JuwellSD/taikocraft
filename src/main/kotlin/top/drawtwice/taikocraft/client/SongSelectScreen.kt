@@ -51,9 +51,12 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
         addRenderableWidget(
             Button.builder(Component.literal("延迟校准")) {
                 minecraft?.setScreen(
-                    CalibrationScreen(this) { offset ->
-                        TaikoCraft.LOGGER.info("校准偏移已应用：{} ms", offset)
-                        // 由 CalibrationScreen 内部调用 setUniversalOffset 持久化，这里只做日志
+                    CalibrationScreen(this) {
+                        TaikoCraft.LOGGER.info(
+                            "偏移已应用：目押 {} ms，音押 {} ms",
+                            TaikoCraftClient.visualOffsetMs,
+                            TaikoCraftClient.audioOffsetMs,
+                        )
                     },
                 )
             }.bounds(width - 130, height - 30, 120, 20).build(),
@@ -181,7 +184,8 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
         } else null
 
         val session = PlaySession(chartFile, chart, playback)
-        session.clock.universalOffsetMs = TaikoCraftClient.universalOffsetMs
+        session.clock.visualOffsetMs = TaikoCraftClient.visualOffsetMs
+        session.clock.audioOffsetMs = TaikoCraftClient.audioOffsetMs
         difficultyHitboxes.clear()
         minecraft?.setScreen(TaikoScreen(session, this))
     }

@@ -27,8 +27,12 @@ import java.nio.file.Path
 class TaikoCraftClient(modEventBus: IEventBus) {
 
     companion object {
-        /** 全局延迟偏移（毫秒），由校准界面写入，持久化到 config/taikocraft/settings.properties */
-        var universalOffsetMs: Double = 0.0
+        /** 目押偏移（毫秒）：只影响音符**渲染位置** */
+        var visualOffsetMs: Double = 0.0
+            private set
+
+        /** 音押偏移（毫秒）：只影响**判定时刻** */
+        var audioOffsetMs: Double = 0.0
             private set
 
         val openMenuKey: KeyMapping = KeyMapping(
@@ -42,12 +46,16 @@ class TaikoCraftClient(modEventBus: IEventBus) {
 
         private fun settingsPath(): Path = Path.of("config", "taikocraft", "settings.properties")
 
-        /** 设置并持久化全局偏移 */
-        fun setUniversalOffset(value: Double) {
-            universalOffsetMs = value
+        /** 设置并持久化两个偏移 */
+        fun setOffsets(visual: Double, audio: Double) {
+            visualOffsetMs = visual
+            audioOffsetMs = audio
             saveSettings()
-            TaikoCraft.LOGGER.info("全局延迟偏移已更新：{} ms", value)
+            TaikoCraft.LOGGER.info("偏移已更新：目押 {} ms，音押 {} ms", visual, audio)
         }
+
+        /** 兼容旧接口：同时设置两者 */
+        fun setUniversalOffset(value: Double) = setOffsets(value, value)
 
         private fun loadSettings() {
             val path = settingsPath()
@@ -55,8 +63,11 @@ class TaikoCraftClient(modEventBus: IEventBus) {
             runCatching {
                 val props = java.util.Properties()
                 Files.newInputStream(path).use { props.load(it) }
-                universalOffsetMs = props.getProperty("universalOffsetMs")?.toDoubleOrNull() ?: 0.0
-                TaikoCraft.LOGGER.info("已加载全局延迟偏移：{} ms", universalOffsetMs)
+                // 旧版只有 universalOffsetMs，兼容读取
+                val legacy = props.getProperty("universalOffsetMs")?.toDoubleOrNull()
+                visualOffsetMs = props.getProperty("visualOffsetMs")?.toDoubleOrNull() ?: legacy ?: 0.0
+                audioOffsetMs = props.getProperty("audioOffsetMs")?.toDoubleOrNull() ?: legacy ?: 0.0
+                TaikoCraft.LOGGER.info("已加载偏移：目押 {} ms，音押 {} ms", visualOffsetMs, audioOffsetMs)
             }.onFailure {
                 TaikoCraft.LOGGER.warn("读取设置失败：{}", it.message)
             }
@@ -67,7 +78,8 @@ class TaikoCraftClient(modEventBus: IEventBus) {
                 val path = settingsPath()
                 Files.createDirectories(path.parent)
                 val props = java.util.Properties()
-                props.setProperty("universalOffsetMs", universalOffsetMs.toString())
+                props.setProperty("visualOffsetMs", visualOffsetMs.toString())
+                props.setProperty("audioOffsetMs", audioOffsetMs.toString())
                 Files.newOutputStream(path).use { props.store(it, "TaikoCraft settings") }
             }.onFailure {
                 TaikoCraft.LOGGER.warn("保存设置失败：{}", it.message)

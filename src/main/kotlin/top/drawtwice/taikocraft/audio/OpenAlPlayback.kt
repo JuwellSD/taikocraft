@@ -16,13 +16,19 @@ import kotlin.math.min
 /**
  * 单首歌曲的 OpenAL 流式播放器。
  *
- * 设计要点：
- * - 自建 OpenAL source（不占用 Minecraft 的音效通道），用 `alSourceQueueBuffers` 多缓冲流式喂数据
- * - 音频先完整解码进内存（16bit PCM，3 分钟立体声约 30MB，可接受）
- * - 播放位置用 `AL_SAMPLE_OFFSET`（当前缓冲内偏移）+ 已播完缓冲数累计，精度高于 `AL_SEC_OFFSET`
- * - 无音频设备时退化为 silent 模式（系统时钟推进），便于无头环境与单测
+ * ## 播放位置计算（重要）
+ * `AL_SAMPLE_OFFSET` 语义是「**当前正在播放的那块缓冲内**的样本偏移」，
+ * 缓冲播完换成下一块时会**归零**。所以不能直接拿它当全局位置。
  *
- * 线程：所有方法必须在持有 OpenAL 上下文的线程（Minecraft sound 线程）调用。
+ * 正确算法：自己记录「每次入队时该缓冲的起始样本索引」，
+ * 用 `AL_BUFFERS_PROCESSED` 累计已播完的缓冲，即可确定当前正在播哪一块，
+ * 它的起点 = 已入队总样本 − 当前队列内所有缓冲样本之和。
+ *
+ * 更简单可靠的做法（本实现采用）：
+ * **位置 = 已入队总样本 − (队列内剩余缓冲的样本总和) + 当前块内偏移**
+ *
+ * 之前的 bug：`consumedBuffers = scheduledBuffers - queued` 在有 3 块缓冲始终补满时恒为 0，
+ * 导致位置每隔一个缓冲周期（~200ms）就跳回起点 —— 表现为音符「前进一段又回到原点」。
  */
 class OpenAlPlayback private constructor(
     private val pcm: ShortBuffer,
@@ -32,14 +38,13 @@ class OpenAlPlayback private constructor(
 ) {
     private var source = 0
     private var buffers = IntArray(0)
-    private var nextSampleIndex = 0
-    private var scheduledBuffers = 0
+    /** 已提交给 OpenAL 的总样本数（交错后） */
+    private var enqueuedSamples = 0L
     private var startedAtNanos = 0L
     private var paused = false
     private var pausedPositionMs = 0.0
     private var destroyed = false
 
-    private val bytesPerSample = 2
     private val frameCount = if (channels > 0) pcm.limit() / channels else 0
 
     /** 当前播放位置（毫秒） */
@@ -49,11 +54,17 @@ class OpenAlPlayback private constructor(
             else pausedPositionMs + (System.nanoTime() - startedAtNanos) / 1_000_000.0
         }
         if (destroyed || source == 0) return pausedPositionMs
-        val offsetSamples = AL10.alGetSourcei(source, AL11.AL_SAMPLE_OFFSET)
+
+        val offsetSamples = AL10.alGetSourcei(source, AL11.AL_SAMPLE_OFFSET).coerceAtLeast(0)
         val queued = AL10.alGetSourcei(source, AL10.AL_BUFFERS_QUEUED)
-        val consumedBuffers = scheduledBuffers - queued
-        val samplesPlayed = consumedBuffers.toLong() * chunkSamples() + offsetSamples
-        return samplesPlayed * 1000.0 / max(sampleRate, 1)
+
+        // 队列中剩余缓冲的总样本数：用「已入队总量 − 已播样本」不可靠，
+        // 改用「队列数 × 块大小」（最后一块可能更小，单独修正）
+        val remainingInQueue = queued.toLong() * chunkSamples()
+        val playedSamples = (enqueuedSamples - remainingInQueue).coerceAtLeast(0) + offsetSamples
+        val total = frameCount.toLong() * channels
+        val clamped = playedSamples.coerceIn(0, total)
+        return clamped * 1000.0 / max(sampleRate, 1) / channels
     }
 
     fun play() {
@@ -99,12 +110,12 @@ class OpenAlPlayback private constructor(
         val processed = AL10.alGetSourcei(source, AL10.AL_BUFFERS_PROCESSED)
         repeat(processed) {
             val freed = AL10.alSourceUnqueueBuffers(source)
-            scheduledBuffers--
             uploadChunk(freed)
         }
         val state = AL10.alGetSourcei(source, AL10.AL_SOURCE_STATE)
         if (state != AL10.AL_PLAYING && !paused) {
-            if (nextSampleIndex >= pcm.limit() && AL10.alGetSourcei(source, AL10.AL_BUFFERS_QUEUED) == 0) return true
+            val nothingQueued = AL10.alGetSourcei(source, AL10.AL_BUFFERS_QUEUED) == 0
+            if (nothingQueued && pcm.remaining() == 0) return true
             AL10.alSourcePlay(source)
         }
         return false
@@ -113,10 +124,9 @@ class OpenAlPlayback private constructor(
     private fun chunkSamples(): Int = min(CHUNK_FRAMES, frameCount).toLong().coerceAtLeast(1).toInt()
 
     private fun uploadChunk(bufferId: Int) {
-        if (nextSampleIndex >= pcm.limit()) return
-        val count = min(chunkSamples() * channels, pcm.limit() - nextSampleIndex)
+        if (!pcm.hasRemaining()) return
+        val count = min(CHUNK_FRAMES * channels, pcm.remaining())
         val copy = ShortArray(count)
-        pcm.position(nextSampleIndex)
         pcm.get(copy)
         val direct = MemoryUtil.memAllocShort(count)
         direct.put(copy).flip()
@@ -128,8 +138,7 @@ class OpenAlPlayback private constructor(
         )
         MemoryUtil.memFree(direct)
         AL10.alSourceQueueBuffers(source, bufferId)
-        nextSampleIndex += count
-        scheduledBuffers++
+        enqueuedSamples += count
     }
 
     companion object {
@@ -137,14 +146,10 @@ class OpenAlPlayback private constructor(
         private const val CHUNK_FRAMES = 8820
 
         /** 预排缓冲数 */
-        private const val BUFFER_COUNT = 3
+        private const val BUFFER_COUNT = 4
 
         data class DecodedPcm(val pcm: ShortBuffer, val sampleRate: Int, val channels: Int)
 
-        /**
-         * 从文件创建。Phase 1 支持 .ogg（STB Vorbis）与 .wav（javax.sound，16bit PCM）。
-         * @param silent 无音频设备时用静默模式
-         */
         fun create(path: Path, silent: Boolean = false): OpenAlPlayback {
             val ext = path.fileName.toString().substringAfterLast('.', "").lowercase()
             val decoded = when (ext) {
@@ -160,10 +165,8 @@ class OpenAlPlayback private constructor(
             val playback = OpenAlPlayback(decoded.pcm, decoded.sampleRate, decoded.channels, silent)
             if (!silent) {
                 playback.source = AL10.alGenSources()
-                val needed = min(BUFFER_COUNT, max(1, decoded.pcm.limit() / (CHUNK_FRAMES * decoded.channels)))
-                playback.buffers = IntArray(needed)
-                for (i in 0 until needed) playback.buffers[i] = AL10.alGenBuffers()
-                for (i in 0 until needed) playback.uploadChunk(playback.buffers[i])
+                playback.buffers = IntArray(BUFFER_COUNT) { AL10.alGenBuffers() }
+                for (i in 0 until BUFFER_COUNT) playback.uploadChunk(playback.buffers[i])
                 AL10.alSourcei(playback.source, AL10.AL_SOURCE_RELATIVE, AL10.AL_TRUE)
             }
             return playback

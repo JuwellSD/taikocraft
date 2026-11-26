@@ -13,9 +13,11 @@ import top.drawtwice.taikocraft.client.input.KeyInputBuffer
 /**
  * 一局游玩的运行时状态：谱面 + 音频 + 时钟 + 判定。
  *
- * 生命周期由 [top.drawtwice.taikocraft.client.TaikoScreen] 管理，
- * 判定与渲染在客户端渲染线程推进（文档 3.1 的本地预测思想；
- * 联机校验留到 Phase 4）。
+ * ## 双时钟
+ * - [renderTimeMs]：音符**画在哪**。受目押偏移（visualOffsetMs）影响。
+ * - [judgeTimeMs]：击打**算多准**。受音押偏移（audioOffsetMs）影响。
+ *
+ * 两者都来自同一个音频播放位置，只是各自减掉不同的延迟。
  */
 class PlaySession(
     val chartFile: TjaChartFile,
@@ -32,18 +34,24 @@ class PlaySession(
     var lastResultAtMs: Double = -1.0
         private set
 
-    /** 输入时间戳与谱面时间的基准差：used to map nanoTime → chartTime */
+    /** 输入时间戳换算用的锚点 */
     private var anchorNanoTime: Long = 0L
-    private var anchorChartTimeMs: Double = 0.0
+    private var anchorJudgeTimeMs: Double = 0.0
 
     var volume: Float = 1.0f
+
+    /** 渲染用时间（受目押偏移影响） */
+    val renderTimeMs: Double get() = clock.chartTimeVisualMs
+
+    /** 判定用时间（受音押偏移影响） */
+    val judgeTimeMs: Double get() = clock.chartTimeJudgeMs
 
     fun start() {
         clock.start()
         playback?.play()
         playback?.setVolume(volume)
         anchorNanoTime = System.nanoTime()
-        anchorChartTimeMs = clock.chartTimeMs
+        anchorJudgeTimeMs = clock.chartTimeJudgeMs
     }
 
     fun pause() {
@@ -57,35 +65,34 @@ class PlaySession(
         KeyInputBuffer.clear()
     }
 
-    /** 每帧推进 */
     fun tick() {
         playback?.let { player ->
             clock.updateFromBackend(player.positionMs())
             player.setVolume(volume)
             if (player.tick() && clock.isPlaying) {
-                // 音频播完，让时钟自然走完尾音
                 clock.pause()
             }
         }
         anchorNanoTime = System.nanoTime()
-        anchorChartTimeMs = clock.chartTimeMs
+        anchorJudgeTimeMs = clock.chartTimeJudgeMs
 
-        // 消费按键事件，把 nanoTime 换算为谱面时间（考虑全局延迟）
+        // 输入事件 → 判定时间轴
         for (hit in KeyInputBuffer.drain()) {
             val deltaMs = (hit.nanoTime - anchorNanoTime) / 1_000_000.0
-            val chartTime = anchorChartTimeMs + deltaMs
-            judge.press(InputEvent(hit.color, hit.side, chartTime))?.let { result ->
+            val judgeTime = anchorJudgeTimeMs + deltaMs
+            judge.press(InputEvent(hit.color, hit.side, judgeTime))?.let { result ->
                 lastResult = result
-                lastResultAtMs = chartTime
+                lastResultAtMs = judgeTime
             }
         }
-        judge.advanceTo(clock.chartTimeMs)
+        // Miss 判定也走判定时钟
+        judge.advanceTo(clock.chartTimeJudgeMs)
     }
 
     /** 判定进度 0..1 */
     fun progress(): Float {
         val total = chart.lastEventMs
         if (total <= 0) return 0f
-        return (clock.chartTimeMs / total).coerceIn(0.0, 1.0).toFloat()
+        return (clock.chartTimeVisualMs / total).coerceIn(0.0, 1.0).toFloat()
     }
 }
