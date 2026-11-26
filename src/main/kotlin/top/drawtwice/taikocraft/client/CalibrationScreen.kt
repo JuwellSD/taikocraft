@@ -4,10 +4,8 @@ import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.Component
-import top.drawtwice.taikocraft.audio.PlaybackClock
-import top.drawtwice.taikocraft.chart.NoteColor
 import top.drawtwice.taikocraft.client.input.KeyInputBuffer
-import top.drawtwice.taikocraft.judge.Side
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
@@ -15,8 +13,11 @@ import kotlin.math.roundToInt
  *
  * 流程：节拍器每 600ms 一次 → 玩家跟着敲 → 收集偏差 → 取中位数作为推荐偏移。
  *
- * 说明：这里不播放真实音频（避免依赖音频加载），用视觉节拍 + 系统时钟。
- * 玩家敲击时刻减去节拍时刻即为 **输出+输入总延迟**，取中位数后取负作为校正值。
+ * 采样规则（已修正）：
+ * - 接受节拍**前后** ±[beatInterval/2] 内的敲击，取环绕到 [-300, +300] 的偏差
+ * - 之前只接受「节拍之后 0–300ms」，提前按的全被丢弃 → 表现为「连按采不到」
+ *
+ * 持久化：结果由 [TaikoCraftClient.universalOffsetMs] 保存，并写入 config 文件。
  */
 class CalibrationScreen(
     private val previous: Screen? = null,
@@ -34,19 +35,39 @@ class CalibrationScreen(
     private var recommended = 0.0
     private var manualValue = 0.0
 
+    /** 从全局配置带入的当前值，展示用 */
+    private var currentGlobal: Double = 0.0
+
     override fun init() {
         startNanos = System.nanoTime()
         samples.clear()
+        lastBeatIndex = -1
+        lastPulseAtMs = 0.0
+        currentGlobal = TaikoCraftClient.universalOffsetMs
+        // 手动微调默认接着当前全局值
+        manualValue = 0.0
+
         addRenderableWidget(
             Button.builder(Component.literal("应用推荐值")) {
-                onApplied(recommended)
+                val final = recommended + manualValue
+                TaikoCraftClient.setUniversalOffset(final)
+                onApplied(final)
                 minecraft?.setScreen(previous)
-            }.bounds(width / 2 - 110, height - 70, 100, 20).build(),
+            }.bounds(width / 2 - 170, height - 70, 110, 20).build(),
+        )
+        addRenderableWidget(
+            Button.builder(Component.literal("清零")) {
+                samples.clear()
+                recommended = 0.0
+                manualValue = 0.0
+                startNanos = System.nanoTime()
+                lastBeatIndex = -1
+            }.bounds(width / 2 - 50, height - 70, 60, 20).build(),
         )
         addRenderableWidget(
             Button.builder(Component.literal("返回")) {
                 minecraft?.setScreen(previous)
-            }.bounds(width / 2 + 10, height - 70, 100, 20).build(),
+            }.bounds(width / 2 + 20, height - 70, 80, 20).build(),
         )
         addRenderableWidget(
             Button.builder(Component.literal("-5ms")) { manualValue -= 5.0 }.bounds(width / 2 - 160, height - 40, 60, 20).build(),
@@ -57,7 +78,6 @@ class CalibrationScreen(
     }
 
     override fun renderContent(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
-
         val nowMs = (System.nanoTime() - startNanos) / 1_000_000.0
         val beatIndex = (nowMs / beatIntervalMs).toInt()
         if (beatIndex != lastBeatIndex) {
@@ -71,68 +91,52 @@ class CalibrationScreen(
             guiGraphics.fill(width / 2 - r, height / 2 - r, width / 2 + r, height / 2 + r, (alpha shl 24) or 0x66CCFF)
         }
 
-        // 消费敲击
+        // 消费敲击：接受节拍**前后** ±beatInterval/2 的偏差，环绕到 [-300, +300]
         for (hit in KeyInputBuffer.drain()) {
-            val delta = nowMs - lastPulseAtMs
-            // 只接受节拍后 0–300ms 内的敲击，且距离节拍足够近
-            if (delta in 0.0..300.0) {
-                val signed = if (delta > 150.0) delta - beatIntervalMs else delta
-                if (samples.size < maxSamples) samples += signed
+            if (samples.size >= maxSamples) continue
+            var delta = nowMs - lastPulseAtMs
+            // 环绕：如果离上一个节拍更近，就算负偏差
+            if (delta > beatIntervalMs / 2) delta -= beatIntervalMs
+            if (abs(delta) <= beatIntervalMs / 2) {
+                samples += delta
             }
-            @Suppress("UNUSED_EXPRESSION")
-            hit.color
-            @Suppress("UNUSED_EXPRESSION")
-            hit.side
+            @Suppress("UNUSED_EXPRESSION") hit.color
+            @Suppress("UNUSED_EXPRESSION") hit.side
         }
         if (samples.size >= 5) {
             recommended = -samples.sorted()[samples.size / 2]
         }
 
-        guiGraphics.drawCenteredString(font, "延迟校准", width / 2, height / 3, 0xFFFFFFFF.toInt())
+        val cx = width / 2
+        guiGraphics.drawCenteredString(font, "延迟校准", cx, height / 3 - 40, 0xFFFFFFFF.toInt())
         guiGraphics.drawCenteredString(
-            font,
-            "跟着蓝色节拍敲击鼓面（任意键）",
-            width / 2,
-            height / 3 + 16,
-            0xFFAAAAAA.toInt(),
+            font, "跟着蓝色节拍敲击（任意键，前后都可以）", cx, height / 3 - 20, 0xFFAAAAAA.toInt(),
         )
         guiGraphics.drawCenteredString(
-            font,
-            "已采样：${samples.size} / $maxSamples",
-            width / 2,
-            height / 3 + 36,
-            0xFF7FE87F.toInt(),
+            font, "已采样：${samples.size} / $maxSamples", cx, height / 3 + 40, 0xFF7FE87F.toInt(),
         )
         if (samples.size >= 3) {
             guiGraphics.drawCenteredString(
-                font,
-                "平均偏差：${samples.average().roundToInt()} ms",
-                width / 2,
-                height / 3 + 52,
-                0xFFFFD24A.toInt(),
+                font, "平均偏差：${samples.average().roundToInt()} ms", cx, height / 3 + 58, 0xFFFFD24A.toInt(),
             )
             guiGraphics.drawCenteredString(
-                font,
-                "推荐偏移：${recommended.roundToInt()} ms",
-                width / 2,
-                height / 3 + 68,
-                0xFFFFD24A.toInt(),
+                font, "推荐偏移：${recommended.roundToInt()} ms", cx, height / 3 + 76, 0xFFFFD24A.toInt(),
             )
         }
+
+        // 当前生效值与手动微调
+        guiGraphics.drawCenteredString(
+            font, "当前已生效：${currentGlobal.roundToInt()} ms", cx, height / 3 + 104, 0xFF888888.toInt(),
+        )
+        guiGraphics.drawCenteredString(
+            font, "手动微调：${manualValue.roundToInt()} ms", cx, height - 55, 0xFFFFFFFF.toInt(),
+        )
         guiGraphics.drawCenteredString(
             font,
-            "手动微调：${manualValue.roundToInt()} ms",
-            width / 2,
-            height - 55,
-            0xFFFFFFFF.toInt(),
+            "应用后 = 推荐 ${recommended.roundToInt()} + 手动 ${manualValue.roundToInt()} = ${(recommended + manualValue).roundToInt()} ms",
+            cx, height - 90, 0xFF66CCFF.toInt(),
         )
     }
 
     override fun isPauseScreen(): Boolean = false
-
-    /** 把校准值换算成 PlaybackClock 的 universalOffsetMs */
-    fun resultingOffset(): Double = recommended + manualValue
-
-    @Suppress("unused")
-    private fun unusedSide(): Side = Side.LEFT
 }

@@ -12,12 +12,13 @@ import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent
 import net.neoforged.neoforge.common.NeoForge
 import org.lwjgl.glfw.GLFW
 import top.drawtwice.taikocraft.TaikoCraft
+import java.nio.file.Files
+import java.nio.file.Path
 
 /**
  * 客户端入口（**只在客户端加载**）。
  *
- * 采用**显式注册**而不是 `@EventBusSubscriber` 自动扫描，原因见 [TaikoCraft] 的注释：
- * KFF 的自动注册不读 `bus` 属性、且要求方法非静态，容易踩坑。
+ * 采用**显式注册**而不是 `@EventBusSubscriber` 自动扫描，原因见 [TaikoCraft] 的注释。
  *
  * - 构造器注入的 `modEventBus` = **MOD 总线** → FMLClientSetup / RegisterKeyMappings
  * - `NeoForge.EVENT_BUS` = **GAME 总线** → ClientTickEvent
@@ -26,11 +27,12 @@ import top.drawtwice.taikocraft.TaikoCraft
 class TaikoCraftClient(modEventBus: IEventBus) {
 
     companion object {
-        /** 全局延迟偏移（毫秒），由校准界面写入 */
-        @JvmField
+        /** 全局延迟偏移（毫秒），由校准界面写入，持久化到 config/taikocraft/settings.properties */
+        @JvmStatic
         var universalOffsetMs: Double = 0.0
+            private set
 
-        @JvmField
+        @JvmStatic
         val openMenuKey: KeyMapping = KeyMapping(
             "key.taikocraft.open_menu",
             InputConstants.Type.KEYSYM,
@@ -39,6 +41,40 @@ class TaikoCraftClient(modEventBus: IEventBus) {
         )
 
         private var wasPressed = false
+
+        private fun settingsPath(): Path = Path.of("config", "taikocraft", "settings.properties")
+
+        /** 设置并持久化全局偏移 */
+        fun setUniversalOffset(value: Double) {
+            universalOffsetMs = value
+            saveSettings()
+            TaikoCraft.LOGGER.info("全局延迟偏移已更新：{} ms", value)
+        }
+
+        private fun loadSettings() {
+            val path = settingsPath()
+            if (!Files.exists(path)) return
+            runCatching {
+                val props = java.util.Properties()
+                Files.newInputStream(path).use { props.load(it) }
+                universalOffsetMs = props.getProperty("universalOffsetMs")?.toDoubleOrNull() ?: 0.0
+                TaikoCraft.LOGGER.info("已加载全局延迟偏移：{} ms", universalOffsetMs)
+            }.onFailure {
+                TaikoCraft.LOGGER.warn("读取设置失败：{}", it.message)
+            }
+        }
+
+        private fun saveSettings() {
+            runCatching {
+                val path = settingsPath()
+                Files.createDirectories(path.parent)
+                val props = java.util.Properties()
+                props.setProperty("universalOffsetMs", universalOffsetMs.toString())
+                Files.newOutputStream(path).use { props.store(it, "TaikoCraft settings") }
+            }.onFailure {
+                TaikoCraft.LOGGER.warn("保存设置失败：{}", it.message)
+            }
+        }
     }
 
     init {
@@ -50,6 +86,7 @@ class TaikoCraftClient(modEventBus: IEventBus) {
     }
 
     private fun onClientSetup(event: FMLClientSetupEvent) {
+        loadSettings()
         TaikoCraft.LOGGER.info("TaikoCraft 客户端就绪，玩家：{}", Minecraft.getInstance().user.name)
     }
 
