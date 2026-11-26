@@ -43,9 +43,11 @@ class TaikoScreen(
     private val barLineColor = 0xFFFFFFFF.toInt()  // 小节线（白竖线）
     private val judgeRingColor = 0xFFB8BCC0.toInt() // 判定线与音符 #129 的叠加
 
-    /** 轨道上可见的「未来时长」 */
-    private val visibleAheadMs = 3_000.0
-    private val visibleBehindMs = 250.0
+    /**
+     * 每「4 个四分音符」占多少像素（OpenTaiko 的 Game_Notes_Interval）。
+     * 变速实现：音符位置 = Δms × bpmAtNote / 240000 × pxPer4Beats
+     * BPM 越高 → 同样的时间距离对应更多的 4 分音符 → 音符跑得更远（视觉加速）
+     */
 
     private var debugVisibleNotes = 0
 
@@ -72,7 +74,8 @@ class TaikoScreen(
         val lane2Top = lane1Bottom + stripH
         val lane2Bottom = lane2Top + trackH
         val laneWidth = (laneRight - laneLeft).coerceAtLeast(1)
-        val pixelsPerMs = laneWidth / visibleAheadMs
+        // 自适应：让基准 BPM 下的「4 拍」约占轨道宽度的 1/4
+        val pxPer4Beats = (laneWidth / 4.0).coerceAtLeast(40.0)
 
         // ---- 左侧信息区（橙色面板）----
         guiGraphics.fill(0, lane1Top, panelW, lane1Bottom, infoPanelBg)
@@ -89,10 +92,11 @@ class TaikoScreen(
         guiGraphics.fill(laneLeft, lane1Bottom, laneRight, lane2Top, centerStrip)
 
         // ---- 小节线（白竖线）----
+        // 小节线用谱面初始 BPM 估算位置（变速点上会有偏差，Phase 1 可接受）
         for (bar in session.chart.barLines) {
             val d = bar.timeMs - now
-            if (d > visibleAheadMs || d < -visibleBehindMs) continue
-            val x = laneLeft + (d * pixelsPerMs).toInt()
+            val n4 = d * session.chart.bpm / 240000.0
+            val x = laneLeft + (n4 * pxPer4Beats).toInt()
             if (x < laneLeft || x > laneRight) continue
             guiGraphics.fill(x, lane1Top, x + 1, lane1Bottom, 0x80FFFFFF.toInt())
             guiGraphics.fill(x, lane2Top, x + 1, lane2Bottom, 0x80FFFFFF.toInt())
@@ -108,8 +112,11 @@ class TaikoScreen(
         val cy1 = (lane1Top + lane1Bottom) / 2
         val cy2 = (lane2Top + lane2Bottom) / 2
 
-        val windowStartMs = now - visibleBehindMs
-        val windowEndMs = now + visibleAheadMs
+        // 时间窗只需覆盖「最大 BPM 下轨道能显示的距离」
+        val maxBpm = notes.maxOfOrNull { it.bpmAtNote } ?: 120.0
+        val aheadMs = 240000.0 * (laneWidth / pxPer4Beats) / maxBpm
+        val windowStartMs = now - 250.0
+        val windowEndMs = now + aheadMs * 1.05
         var idx = lowerBound(notes, windowStartMs)
         while (idx < notes.size) {
             val noteIndex = idx
@@ -117,8 +124,10 @@ class TaikoScreen(
             if (note.timeMs > windowEndMs) break
             idx++
 
+            // ★ 变速：位置按「4 分音符距离」计算（OpenTaiko Normal 模式）
             val deltaMs = note.timeMs - now
-            val x = laneLeft + (deltaMs * pixelsPerMs).toInt()
+            val n4Beats = deltaMs * note.bpmAtNote / 240000.0
+            val x = laneLeft + (n4Beats * pxPer4Beats).toInt()
             if (x < laneLeft - 40 || x > laneRight + 40) continue
 
             val cy = if (note.player == 1) cy1 else cy2
@@ -188,21 +197,33 @@ class TaikoScreen(
     }
 
     /**
-     * 画「白边空心圆」音符。
+     * 画「白边空心圆」音符（参考视频第二张图）。
      *
-     * 由外到内：
-     * 1. 白色实心圆（半径 r）
-     * 2. 深色底色圆（半径 r-3）
-     * 3. 彩色内芯（半径 r-6）
+     * 由外到内 5 层：
+     * ```
+     *   ┌──────────── 外白环（厚约 3-4px，最亮）
+     *   │ ┌────────── 深色描边（1px，把白环和内底分开）
+     *   │ │ ┌──────── 深灰内底
+     *   │ │ │ ┌────── 彩色内芯（咚红 / 咔青）
+     *   │ │ │ │ ┌──── 高光（左上角小亮点）
+     * ```
      */
     private fun drawHollowNote(g: GuiGraphics, cx: Int, cy: Int, r: Int, innerColor: Int, alpha: Int) {
-        val ringAlpha = (alpha shl 24)
-        // 外白环
-        drawDisc(g, cx, cy, r, ringAlpha or (outerRingColor and 0xFFFFFF), fillHeight = 2)
-        // 深色底
-        drawDisc(g, cx, cy, r - 3, alpha shl 24 or (noteBgColor and 0xFFFFFF), fillHeight = 2)
-        // 彩色内芯
-        drawDisc(g, cx, cy, (r - 6).coerceAtLeast(2), alpha shl 24 or (innerColor and 0xFFFFFF), fillHeight = 2)
+        if (alpha <= 0) return
+        val a = alpha.coerceIn(0, 255) shl 24
+        // 1. 外白环（实心白圆，后面会被内层覆盖中间）
+        drawDisc(g, cx, cy, r, a or 0xFFFFFF, fillHeight = 1)
+        // 2. 深色描边
+        drawDisc(g, cx, cy, r - 3, a or 0x1A1A1A, fillHeight = 1)
+        // 3. 深灰内底
+        drawDisc(g, cx, cy, r - 4, a or 0x2A2E35, fillHeight = 1)
+        // 4. 彩色内芯
+        val innerR = (r - 7).coerceAtLeast(2)
+        drawDisc(g, cx, cy, innerR, a or (innerColor and 0xFFFFFF), fillHeight = 1)
+        // 5. 高光（左上角，纯视觉，不改变判定）
+        if (r >= 10) {
+            drawDisc(g, cx - innerR / 3, cy - innerR / 3, (innerR / 3).coerceAtLeast(1), a or 0xFFFFFF, fillHeight = 1)
+        }
     }
 
     /** 画圆环（只画边框） */

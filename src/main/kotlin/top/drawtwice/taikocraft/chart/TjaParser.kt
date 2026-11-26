@@ -221,7 +221,9 @@ object TjaParser {
         /** 本小节已处理的音符字符数（用于空小节判定） */
         var measureChars = 0
 
-        fun toAudioTime(pos: Double): Double = pos + delayMs - offsetMs
+        // 只算 #DELAY，**不减 OFFSET**：OFFSET 由 PlaybackClock 统一处理
+        // （否则会双重计算，表现为音频与谱面错开半个小节）
+        fun toAudioTime(pos: Double): Double = pos + delayMs
 
         // ---------------------------------------------------------------
         // 单遍处理：命令与数据行按顺序处理，保证 BPM 变化的相对位置正确
@@ -293,12 +295,12 @@ object TjaParser {
 
                 val time = toAudioTime(currentTimeMs)
                 when (ch) {
-                    '1' -> notes += Note(time, NoteColor.DON)
-                    '2' -> notes += Note(time, NoteColor.KA)
-                    '3' -> notes += Note(time, NoteColor.DON, big = true)
-                    '4' -> notes += Note(time, NoteColor.KA, big = true)
-                    'A' -> notes += Note(time, NoteColor.DON, big = true, player = 2)
-                    'B' -> notes += Note(time, NoteColor.KA, big = true, player = 2)
+                    '1' -> notes += Note(time, NoteColor.DON, bpmAtNote = currentBpm)
+                    '2' -> notes += Note(time, NoteColor.KA, bpmAtNote = currentBpm)
+                    '3' -> notes += Note(time, NoteColor.DON, big = true, bpmAtNote = currentBpm)
+                    '4' -> notes += Note(time, NoteColor.KA, big = true, bpmAtNote = currentBpm)
+                    'A' -> notes += Note(time, NoteColor.DON, big = true, player = 2, bpmAtNote = currentBpm)
+                    'B' -> notes += Note(time, NoteColor.KA, big = true, player = 2, bpmAtNote = currentBpm)
                     '5' -> { openRollStart = time; openRollBig = false }
                     '6' -> { openRollStart = time; openRollBig = true }
                     '7', '9' -> openBalloonStart = time

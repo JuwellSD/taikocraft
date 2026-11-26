@@ -6,16 +6,19 @@ enum class NoteColor { DON, KA }
 /**
  * 谱面上的一个音符。
  *
- * @param timeMs 该音符在**音频时间轴**上的绝对时刻（毫秒）。
- *   已应用 TJA 的 OFFSET 与 #DELAY。#BPMCHANGE/#MEASURE 已在时间轴推导中体现。
- * @param big 大音符（大咚/大咔）
- * @param player 1 = 1P，2 = 2P（TJA 的 A/B 与 #START P1/P2）
+ * @param timeMs 该音符在**音频时间轴**上的绝对时刻（毫秒），已应用 OFFSET 与 #DELAY。
+ * @param color 咚 / 咔
+ * @param big 大音符
+ * @param player 1 = 1P，2 = 2P
+ * @param bpmAtNote 音符所在处的 BPM。渲染时用来实现「变速视觉」：
+ *   `距离(4分音符) = Δms × bpmAtNote / 240000`（OpenTaiko Normal 模式）
  */
 data class Note(
     val timeMs: Double,
     val color: NoteColor,
     val big: Boolean = false,
     val player: Int = 1,
+    val bpmAtNote: Double = 120.0,
 ) {
     init {
         require(player == 1 || player == 2) { "player 只能是 1 或 2，收到 $player" }

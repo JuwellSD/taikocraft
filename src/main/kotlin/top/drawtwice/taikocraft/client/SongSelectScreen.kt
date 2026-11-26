@@ -2,6 +2,7 @@ package top.drawtwice.taikocraft.client
 
 import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.components.Button
+import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.Component
 import top.drawtwice.taikocraft.TaikoCraft
@@ -27,6 +28,10 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
 
     /** 每页条目数 */
     private val pageSize = 8
+
+    /** 延迟手动输入框 */
+    private var visualBox: EditBox? = null
+    private var audioBox: EditBox? = null
 
     override fun init() {
         songs = runCatching { library.listSongs() }
@@ -61,6 +66,46 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
                 )
             }.bounds(width - 130, height - 30, 120, 20).build(),
         )
+        // ---- 延迟手动输入 ----
+        val boxY = height - 56
+        visualBox = EditBox(font, width - 250, boxY, 50, 18, Component.literal("目押")).apply {
+            setMaxLength(6)
+            setValue(TaikoCraftClient.visualOffsetMs.toInt().toString())
+            setResponder { txt -> txt.toDoubleOrNull()?.let { applyOffsets(visual = it) } }
+        }
+        audioBox = EditBox(font, width - 180, boxY, 50, 18, Component.literal("音押")).apply {
+            setMaxLength(6)
+            setValue(TaikoCraftClient.audioOffsetMs.toInt().toString())
+            setResponder { txt -> txt.toDoubleOrNull()?.let { applyOffsets(audio = it) } }
+        }
+        visualBox?.let { addRenderableWidget(it) }
+        audioBox?.let { addRenderableWidget(it) }
+
+        addRenderableWidget(
+            Button.builder(Component.literal("-5")) {
+                applyOffsets(visual = TaikoCraftClient.visualOffsetMs - 5)
+                visualBox?.setValue(TaikoCraftClient.visualOffsetMs.toInt().toString())
+            }.bounds(width - 250, boxY - 22, 40, 18).build(),
+        )
+        addRenderableWidget(
+            Button.builder(Component.literal("+5")) {
+                applyOffsets(visual = TaikoCraftClient.visualOffsetMs + 5)
+                visualBox?.setValue(TaikoCraftClient.visualOffsetMs.toInt().toString())
+            }.bounds(width - 205, boxY - 22, 40, 18).build(),
+        )
+        addRenderableWidget(
+            Button.builder(Component.literal("-5")) {
+                applyOffsets(audio = TaikoCraftClient.audioOffsetMs - 5)
+                audioBox?.setValue(TaikoCraftClient.audioOffsetMs.toInt().toString())
+            }.bounds(width - 180, boxY - 22, 40, 18).build(),
+        )
+        addRenderableWidget(
+            Button.builder(Component.literal("+5")) {
+                applyOffsets(audio = TaikoCraftClient.audioOffsetMs + 5)
+                audioBox?.setValue(TaikoCraftClient.audioOffsetMs.toInt().toString())
+            }.bounds(width - 135, boxY - 22, 40, 18).build(),
+        )
+
         addRenderableWidget(
             Button.builder(Component.literal("上一页")) { scrollOffset = (scrollOffset - pageSize).coerceAtLeast(0) }
                 .bounds(10, height - 80, 80, 20).build(),
@@ -69,6 +114,14 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
             Button.builder(Component.literal("下一页")) {
                 if (scrollOffset + pageSize < songs.size) scrollOffset += pageSize
             }.bounds(96, height - 80, 80, 20).build(),
+        )
+    }
+
+    /** 只改传入的那个值，另一个保持不变 */
+    private fun applyOffsets(visual: Double? = null, audio: Double? = null) {
+        TaikoCraftClient.setOffsets(
+            visual ?: TaikoCraftClient.visualOffsetMs,
+            audio ?: TaikoCraftClient.audioOffsetMs,
         )
     }
 
@@ -108,6 +161,17 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
                 }
                 y += 4
             }
+        }
+
+        // 延迟标签
+        if (songs.isNotEmpty() || true) {
+            guiGraphics.drawString(font, "目押", width - 250, height - 74, 0xFFAAAAAA.toInt())
+            guiGraphics.drawString(font, "音押", width - 180, height - 74, 0xFFAAAAAA.toInt())
+            guiGraphics.drawString(
+                font,
+                "ms（改完自动保存）",
+                width - 120, height - 51, 0xFF666666.toInt(),
+            )
         }
 
         if (statusMessage.isNotBlank()) {

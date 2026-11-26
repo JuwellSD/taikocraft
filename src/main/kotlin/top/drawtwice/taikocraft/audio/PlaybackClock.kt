@@ -27,6 +27,17 @@ package top.drawtwice.taikocraft.audio
 class PlaybackClock(
     /** 音频文件自身的起始静音（毫秒） */
     private val leadInMs: Double = 0.0,
+    /**
+     * 音频启动延迟（毫秒）：TJA 的 OFFSET 语义。
+     *
+     * OpenTaiko 的处理：
+     * - **正 OFFSET**：只把「音乐」往后推 → 音频延后启动，谱面时间不变
+     * - **负 OFFSET**：只把「音符」往后推 → 音频立刻开始，谱面时间整体 +|OFFSET|
+     *
+     * 本类把它归一化为「音频先等多久」：offset > 0 时音频延迟启动，
+     * offset < 0 时音频立即启动、谱面时间轴整体后移。
+     */
+    val tjaOffsetMs: Double = 0.0,
 ) {
     /** 目押偏移（毫秒）：只影响**渲染位置** */
     var visualOffsetMs: Double = 0.0
@@ -58,10 +69,20 @@ class PlaybackClock(
 
     fun start(fromMs: Double = 0.0) {
         startPositionMs = fromMs
-        startNanos = System.nanoTime()
+        // 正 OFFSET：音频延后启动（谱面从 0 开始，音乐晚 offsetMs 才响）
+        val delay = if (tjaOffsetMs > 0) tjaOffsetMs else 0.0
+        startNanos = System.nanoTime() - (delay * 1_000_000).toLong()
         pausedPositionMs = fromMs
         playing = true
+        audioStartDelayMs = delay
     }
+
+    /** 音频启动延迟（毫秒）；>0 表示还没开始出声 */
+    private var audioStartDelayMs: Double = 0.0
+
+    /** 音频是否已经真正开始出声（用于判断是否需要启动播放器） */
+    val audioShouldStart: Boolean
+        get() = playing && songPositionMs >= audioStartDelayMs
 
     fun pause() {
         pausedPositionMs = songPositionMs
@@ -104,13 +125,27 @@ class PlaybackClock(
         // 故意不做任何事：每帧对齐会导致回跳/突进
     }
 
+    /**
+     * 谱面时间 = 音频播放位置 + TJA OFFSET
+     *
+     * OpenTaiko 的语义：
+     * - 谱面原始时间轴（不含 OFFSET）从 0 开始
+     * - **正 OFFSET** → 音符相对音频**提前**，即谱面时间 = 音频 + OFFSET
+     * - **负 OFFSET** → 音符相对音频**延后**，同样是 + OFFSET（负值就是减）
+     *
+     * 例：OFFSET = -1.816s，音频播到 0ms 时谱面在 -1816ms（还没开始），
+     *     音频播到 1816ms 时谱面在 0ms（第一个音符命中）。
+     */
+    private val chartBaseMs: Double
+        get() = songPositionMs + tjaOffsetMs + leadInMs
+
     /** 渲染用时间轴（音符位置）：受目押偏移影响 */
     val chartTimeVisualMs: Double
-        get() = songPositionMs + leadInMs - visualOffsetMs
+        get() = chartBaseMs - visualOffsetMs
 
     /** 判定用时间轴（击打时刻换算）：受音押偏移影响 */
     val chartTimeJudgeMs: Double
-        get() = songPositionMs + leadInMs - audioOffsetMs
+        get() = chartBaseMs - audioOffsetMs
 
     val chartTimeMs: Double get() = chartTimeVisualMs
 

@@ -25,7 +25,10 @@ class PlaySession(
     private val playback: OpenAlPlayback?,
     judgeConfig: JudgeConfig = JudgeConfig(),
 ) {
-    val clock = PlaybackClock()
+    /** TJA OFFSET（毫秒），从谱面读取 */
+    private val tjaOffsetMs: Double = chart.offsetMs
+
+    val clock = PlaybackClock(tjaOffsetMs = tjaOffsetMs)
     val judge = JudgeEngine(chart, judgeConfig)
 
     /** 最近一次判定结果，供界面做反馈动画 */

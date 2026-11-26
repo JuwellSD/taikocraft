@@ -81,9 +81,12 @@ class TjaParserTest {
     }
 
     @Test
-    fun `OFFSET 为正时谱面提前`() {
+    fun `OFFSET 不参与解析 由 PlaybackClock 统一处理`() {
+        // OpenTaiko 语义：正 OFFSET 只平移音乐，负 OFFSET 只平移音符。
+        // 为避免双重计算，解析器只输出「不含 OFFSET」的原始时间轴，
+        // OFFSET 由 PlaybackClock 统一叠加。
         val times = TjaParser.parse(tja(offset = "1", body = "1111")).charts[0].notes.map { it.timeMs }
-        assertEquals(listOf(-1000.0, -500.0, 0.0, 500.0), times)
+        assertEquals(listOf(0.0, 500.0, 1000.0, 1500.0), times)
     }
 
     @Test
@@ -260,7 +263,7 @@ class TjaParserTest {
         val chart = file.charts[0]
 
         assertEquals("Yuugen no Ran", file.title)
-        assertEquals(-1816.0, chart.offsetMs, 0.001)
+        assertEquals(-1816.0, chart.offsetMs, 0.001)  // 元数据仍保留
         assertEquals(160.0, chart.bpm, 0.001)
 
         // 期望值由 OpenTaiko 的 divsPerMeasure 模型独立算出
@@ -268,19 +271,20 @@ class TjaParserTest {
         assertEquals(89, chart.notes.size)
 
         val first16 = chart.notes.take(16).map { it.timeMs }
+        // 注意：解析器不再叠加 OFFSET，所以这些是原始时间轴（真实的 −1816ms）
         val expected = listOf(
-            1816.0, 1941.0, 2066.0, 2191.0,
-            2566.0, 2691.0, 2816.0, 2941.0,
-            3316.0, 3441.0, 3566.0, 3691.0,
-            4066.0, 4441.0, 4816.0, 4941.0,
+            0.0, 125.0, 250.0, 375.0,
+            750.0, 875.0, 1000.0, 1125.0,
+            1500.0, 1625.0, 1750.0, 1875.0,
+            2250.0, 2625.0, 3000.0, 3125.0,
         )
         assertEquals(expected, first16, "音符时间轴必须与 OpenTaiko 一致")
 
         val bars = chart.barLines.take(12).map { it.timeMs }
         assertEquals(
             listOf(
-                3316.0, 4816.0, 6316.0, 7816.0, 9316.0, 10816.0,
-                12316.0, 13816.0, 15316.0, 16816.0, 18316.0, 19116.0,
+                1500.0, 3000.0, 4500.0, 6000.0, 7500.0, 9000.0,
+                10500.0, 12000.0, 13500.0, 15000.0, 16500.0, 17300.0,
             ),
             bars,
         )
