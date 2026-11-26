@@ -56,3 +56,16 @@
 - [x] 选曲界面加入口
 
 使用：把 `.osz` 放进 `config/taikocraft/osz/` → 选曲界面点「曲包编辑器」→ 改完导出。
+
+### 曲目导入（2026-11-27，坠尔确认规则）
+- [x] `.osz` 直接导入（本身是 ZIP）
+- [x] `.tja` 必须附带音频（`.ogg` / `.mp3` / `.wav`，同目录同名自动匹配）
+- [x] `.zip` 打包导入（内含 tja+音频，或内含 osz）
+- [x] MP3 解码（mp3spi，隔离在 `audio/Mp3Decoder.kt`，LGPL）
+- [x] `ImportScreen`：投放目录 `config/taikocraft/import/`，点选导入
+- [x] 11 项单测
+- [x] CI 上传构建产物 jar
+
+### 键位修正（2026-11-27）
+- 新手：左咔 `D` / 左咚 `F` / 右咚 `J` / 右咔 `K`
+- 老手：左咔 `R` / 左咚 `F` / 右咚 `J` / 右咔 `I`
