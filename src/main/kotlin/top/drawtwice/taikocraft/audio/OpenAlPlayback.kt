@@ -3,11 +3,9 @@ package top.drawtwice.taikocraft.audio
 import org.lwjgl.openal.AL10
 import org.lwjgl.openal.AL11
 import org.lwjgl.stb.STBVorbis
-import org.lwjgl.system.MemoryStack
 import org.lwjgl.system.MemoryUtil
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
-import java.nio.ByteBuffer
 import java.nio.ShortBuffer
 import java.nio.file.Files
 import java.nio.file.Path
@@ -171,41 +169,40 @@ class OpenAlPlayback private constructor(
         }
 
         private fun decodeOgg(bytes: ByteArray): DecodedPcm {
-            val direct = MemoryUtil.memAlloc(bytes.size).put(bytes).flip() as ByteBuffer
-            MemoryStack.stackPush().use { stack ->
-                val error = stack.mallocInt(1)
-                val decoder = STBVorbis.stb_vorbis_open_memory(direct, error, null, null)
-                if (decoder == 0L) {
-                    MemoryUtil.memFree(direct)
-                    throw IllegalStateException("OGG 解码失败（错误码 ${error.get(0)}）")
-                }
+            val direct = MemoryUtil.memAlloc(bytes.size)
+            direct.put(bytes).flip()
+
+            val error = IntArray(1)
+            val decoder = STBVorbis.stb_vorbis_open_memory(direct, error, null)
+            if (decoder == 0L) {
+                MemoryUtil.memFree(direct)
+                throw IllegalStateException("OGG 解码失败（错误码 ${error[0]}）")
+            }
+            try {
+                val info = STBVorbis.stb_vorbis_get_info(decoder)
+                val channels = info.channels()
+                val rate = info.sample_rate()
+                val frames = STBVorbis.stb_vorbis_stream_length_in_samples(decoder)
+                val pcm = ShortBuffer.allocate(max(frames, 0) * channels)
+                val chunk = MemoryUtil.memAllocShort(CHUNK_FRAMES * channels)
                 try {
-                    val info = STBVorbis.stb_vorbis_get_info(decoder)
-                    val channels = info.channels()
-                    val rate = info.sample_rate()
-                    val frames = STBVorbis.stb_vorbis_stream_length_in_samples(decoder)
-                    val pcm = ShortBuffer.allocate(max(frames, 0) * channels)
-                    // 缓冲区分配在栈外，循环内复用
-                    val chunk = org.lwjgl.system.MemoryUtil.memAllocShort(CHUNK_FRAMES * channels)
-                    try {
-                        while (true) {
-                            chunk.clear()
-                            val read = STBVorbis.stb_vorbis_get_samples_short_interleaved(decoder, channels, chunk)
-                            if (read <= 0) break
-                            val copy = ShortArray(read * channels)
-                            chunk.position(0)
-                            chunk.get(copy)
-                            pcm.put(copy)
-                        }
-                    } finally {
-                        org.lwjgl.system.MemoryUtil.memFree(chunk)
+                    while (true) {
+                        chunk.clear()
+                        val read = STBVorbis.stb_vorbis_get_samples_short_interleaved(decoder, channels, chunk)
+                        if (read <= 0) break
+                        val copy = ShortArray(read * channels)
+                        chunk.position(0)
+                        chunk.get(copy)
+                        pcm.put(copy)
                     }
-                    pcm.flip()
-                    return DecodedPcm(pcm, rate, channels)
                 } finally {
-                    STBVorbis.stb_vorbis_close(decoder)
-                    MemoryUtil.memFree(direct)
+                    MemoryUtil.memFree(chunk)
                 }
+                pcm.flip()
+                return DecodedPcm(pcm, rate, channels)
+            } finally {
+                STBVorbis.stb_vorbis_close(decoder)
+                MemoryUtil.memFree(direct)
             }
         }
 
