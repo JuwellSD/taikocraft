@@ -39,9 +39,14 @@ class SongSelectScreen(private val previous: Screen? = null) : Screen(Component.
             }.bounds(10, height - 30, 80, 20).build(),
         )
         addRenderableWidget(
+            Button.builder(Component.literal("导入曲目")) {
+                minecraft?.setScreen(ImportScreen(this))
+            }.bounds(96, height - 56, 80, 20).build(),
+        )
+        addRenderableWidget(
             Button.builder(Component.literal("曲包编辑器")) {
                 minecraft?.setScreen(OszEditorScreen(this))
-            }.bounds(width - 250, height - 30, 110, 20).build(),
+            }.bounds(width - 370, height - 30, 110, 20).build(),
         )
         addRenderableWidget(
             Button.builder(Component.literal("延迟校准")) {
@@ -55,12 +60,12 @@ class SongSelectScreen(private val previous: Screen? = null) : Screen(Component.
         )
         addRenderableWidget(
             Button.builder(Component.literal("上一页")) { scrollOffset = (scrollOffset - pageSize).coerceAtLeast(0) }
-                .bounds(10, height - 56, 80, 20).build(),
+                .bounds(10, height - 80, 80, 20).build(),
         )
         addRenderableWidget(
             Button.builder(Component.literal("下一页")) {
                 if (scrollOffset + pageSize < songs.size) scrollOffset += pageSize
-            }.bounds(96, height - 56, 80, 20).build(),
+            }.bounds(96, height - 80, 80, 20).build(),
         )
     }
 
