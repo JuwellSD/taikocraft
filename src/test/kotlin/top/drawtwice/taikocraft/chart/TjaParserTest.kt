@@ -47,11 +47,12 @@ class TjaParserTest {
 
     @Test
     fun `空小节推进时间轴`() {
-        // TJA 里每行用逗号分隔小节：",," = 2 个空小节（split 产生 2 个空片段）
+        // Kotlin 的 split(",") 保留尾部空串：",," → ["", "", ""] = 3 个空小节
+        // （TJA 语义上逗号是小节分隔符，N 个逗号 = N+1 个小节）
         val file = TjaParser.parse(tja(body = ",,"))
         val chart = file.charts[0]
-        assertEquals(2, chart.barLines.size)
-        assertEquals(4000.0, chart.barLines.last().timeMs, 0.001)
+        assertEquals(3, chart.barLines.size)
+        assertEquals(6000.0, chart.barLines.last().timeMs, 0.001)
         assertTrue(chart.notes.isEmpty())
 
         val two = TjaParser.parse(tja(body = "1,1")).charts[0]
