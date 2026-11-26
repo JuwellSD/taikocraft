@@ -15,6 +15,10 @@ import java.nio.file.Path
  *
  * 编辑的是**元数据**，不碰谱面本身。参照坠尔的需求：
  * "osz 格式里面的难度有时候会很乱"。
+ *
+ * 危险操作的保护（坠尔指定）：
+ * - **多选删除**：连续确认 2 次，每次 5 秒倒计时
+ * - **只保留当前难度**：连续确认 3 次，每次 7 秒倒计时
  */
 class OszEditorScreen(
     private val previous: Screen? = null,
@@ -29,6 +33,49 @@ class OszEditorScreen(
     private var titleBox: EditBox? = null
     private var artistBox: EditBox? = null
     private var versionBox: EditBox? = null
+
+    /** 多选模式：点击难度行切换勾选 */
+    private var multiSelectMode = false
+    private val selectedForDelete = mutableSetOf<String>()
+
+    /** 危险操作的待确认状态 */
+    private enum class ConfirmAction(
+        val totalSteps: Int,
+        val stepDurationMs: Long,
+        val idleLabel: String,
+    ) {
+        MULTI_DELETE(2, 5_000L, "删除选中"),
+        KEEP_ONLY(3, 7_000L, "只保留当前"),
+    }
+
+    private class PendingConfirm(val action: ConfirmAction) {
+        var step = 1
+        var stepStartedAtNanos = System.nanoTime()
+
+        val total: Int get() = action.totalSteps
+        val durationMs: Long get() = action.stepDurationMs
+
+        fun elapsedMs(): Long = (System.nanoTime() - stepStartedAtNanos) / 1_000_000
+        fun remainingMs(): Long = (durationMs - elapsedMs()).coerceAtLeast(0)
+        fun ready(): Boolean = remainingMs() == 0L
+
+        fun advance() {
+            step++
+            stepStartedAtNanos = System.nanoTime()
+        }
+    }
+
+    private var pending: PendingConfirm? = null
+
+    private var multiSelectButton: Button? = null
+    private var multiDeleteButton: Button? = null
+    private var keepOnlyButton: Button? = null
+    private var cancelButton: Button? = null
+
+    /** 难度行命中区（render 时计算，mouseClicked 使用） */
+    private data class RowHit(val index: Int, val y: Int)
+    private val rowHits = mutableListOf<RowHit>()
+    private var listScroll = 0
 
     override fun init() {
         OszStorage.ensureDirectories()
@@ -54,6 +101,10 @@ class OszEditorScreen(
             }
             .getOrNull()
         difficultyIndex = 0
+        multiSelectMode = false
+        selectedForDelete.clear()
+        pending = null
+        listScroll = 0
         refreshEditors()
     }
 
@@ -64,10 +115,10 @@ class OszEditorScreen(
         clearWidgets()
         val top = 44
 
-        // 曲包切换
         addRenderableWidget(
             Button.builder(Component.literal("◀ 曲包")) {
                 if (packages.isNotEmpty()) {
+                    cancelPending(quiet = true)
                     packageIndex = (packageIndex - 1 + packages.size) % packages.size
                     loadPackage(packages[packageIndex])
                     buildLayout()
@@ -77,18 +128,18 @@ class OszEditorScreen(
         addRenderableWidget(
             Button.builder(Component.literal("曲包 ▶")) {
                 if (packages.isNotEmpty()) {
+                    cancelPending(quiet = true)
                     packageIndex = (packageIndex + 1) % packages.size
                     loadPackage(packages[packageIndex])
                     buildLayout()
                 }
             }.bounds(86, top, 70, 20).build(),
         )
-
-        // 难度切换
         addRenderableWidget(
             Button.builder(Component.literal("◀ 难度")) {
                 if (difficultyIndex > 0) {
                     difficultyIndex--
+                    pending = null
                     refreshEditors()
                 }
             }.bounds(190, top, 70, 20).build(),
@@ -98,12 +149,12 @@ class OszEditorScreen(
                 val max = (editor?.difficulties?.size ?: 1) - 1
                 if (difficultyIndex < max) {
                     difficultyIndex++
+                    pending = null
                     refreshEditors()
                 }
             }.bounds(266, top, 70, 20).build(),
         )
 
-        // 输入框
         val boxX = 120
         val boxW = width - 140
         titleBox = EditBox(font, boxX, 78, boxW, 18, Component.literal("歌名")).apply {
@@ -125,15 +176,37 @@ class OszEditorScreen(
         artistBox?.let { addRenderableWidget(it) }
         versionBox?.let { addRenderableWidget(it) }
 
-        // 删除/恢复
         addRenderableWidget(
-            Button.builder(Component.literal("删除此难度")) {
+            Button.builder(Component.literal("删除/恢复此难度")) {
                 val d = currentDifficulty() ?: return@builder
                 if (d.isDeleted) d.restore() else d.delete()
-            }.bounds(120, 162, 100, 20).build(),
+                pending = null
+            }.bounds(120, 162, 130, 20).build(),
         )
 
-        // 导出
+        // ---- 多选删除相关 ----
+        multiSelectButton = Button.builder(Component.literal("多选模式：关")) {
+            multiSelectMode = !multiSelectMode
+            if (!multiSelectMode) selectedForDelete.clear()
+            pending = null
+        }.bounds(10, height - 96, 100, 20).build()
+        addRenderableWidget(multiSelectButton!!)
+
+        multiDeleteButton = Button.builder(Component.literal("删除选中")) {
+            onDangerClick(ConfirmAction.MULTI_DELETE)
+        }.bounds(114, height - 96, 120, 20).build()
+        addRenderableWidget(multiDeleteButton!!)
+
+        keepOnlyButton = Button.builder(Component.literal("只保留当前")) {
+            onDangerClick(ConfirmAction.KEEP_ONLY)
+        }.bounds(238, height - 96, 120, 20).build()
+        addRenderableWidget(keepOnlyButton!!)
+
+        cancelButton = Button.builder(Component.literal("取消确认")) {
+            cancelPending()
+        }.bounds(362, height - 96, 90, 20).build()
+        addRenderableWidget(cancelButton!!)
+
         addRenderableWidget(
             Button.builder(Component.literal("导出修改后的 osz")) {
                 exportPackage()
@@ -145,6 +218,103 @@ class OszEditorScreen(
             }.bounds(width - 90, height - 30, 80, 20).build(),
         )
     }
+
+    // ------------------------------------------------------------------
+    // 危险操作：多重倒计时确认
+    // ------------------------------------------------------------------
+
+    private fun onDangerClick(action: ConfirmAction) {
+        val current = pending
+        if (current != null) {
+            if (current.action != action) {
+                status = "已有未完成的确认，先取消或继续"
+                return
+            }
+            if (!current.ready()) {
+                status = "倒计时未结束（还剩 ${(current.remainingMs() / 1000.0).toInt() + 1} 秒）"
+                return
+            }
+            if (current.step < current.total) {
+                current.advance()
+                status = "已确认 ${current.step - 1}/${current.total}，请继续"
+                return
+            }
+            // 最后一步：执行
+            execute(action)
+            pending = null
+            return
+        }
+
+        // 首次点击：先检查前置条件
+        when (action) {
+            ConfirmAction.MULTI_DELETE -> {
+                val all = editor?.difficulties ?: return
+                if (!multiSelectMode) {
+                    status = "先打开多选模式并勾选难度"
+                    return
+                }
+                if (selectedForDelete.isEmpty()) {
+                    status = "先勾选要删除的难度"
+                    return
+                }
+                if (selectedForDelete.size >= all.size) {
+                    status = "不能删除全部难度（至少保留一个）"
+                    return
+                }
+            }
+            ConfirmAction.KEEP_ONLY -> {
+                val all = editor?.difficulties ?: return
+                if (all.size <= 1) {
+                    status = "只有一个难度，无需操作"
+                    return
+                }
+            }
+        }
+        pending = PendingConfirm(action)
+        status = ""
+    }
+
+    private fun execute(action: ConfirmAction) {
+        val ed = editor ?: return
+        when (action) {
+            ConfirmAction.MULTI_DELETE -> {
+                val count = selectedForDelete.size
+                ed.difficulties.filter { it.fileName in selectedForDelete }.forEach { it.delete() }
+                selectedForDelete.clear()
+                multiSelectMode = false
+                status = "已标记删除 $count 个难度（记得点「导出修改后的 osz」）"
+            }
+            ConfirmAction.KEEP_ONLY -> {
+                val keep = currentDifficulty() ?: return
+                var removed = 0
+                ed.difficulties.forEach {
+                    if (it !== keep && !it.isDeleted) {
+                        it.delete()
+                        removed++
+                    }
+                }
+                status = "已只保留「${keep.version}」，其余 $removed 个标记删除（记得导出）"
+            }
+        }
+    }
+
+    private fun cancelPending(quiet: Boolean = false) {
+        if (pending != null && !quiet) status = "已取消确认"
+        pending = null
+    }
+
+    private fun confirmButtonLabel(action: ConfirmAction, extra: String = ""): String {
+        val p = pending
+        if (p == null || p.action != action) return action.idleLabel + extra
+        return if (p.ready()) {
+            "确认 ${p.step}/${p.total}" + if (p.step == p.total) "（最后一步）" else ""
+        } else {
+            val secs = (p.remainingMs() / 1000.0).let { "%.1f".format(it) }
+            "确认 ${p.step}/${p.total} · ${secs}s"
+        }
+    }
+
+    // ------------------------------------------------------------------
 
     private fun refreshEditors() {
         val d = currentDifficulty()
@@ -178,9 +348,22 @@ class OszEditorScreen(
         }
     }
 
+    // ------------------------------------------------------------------
+
+    private val listTop = 226
+
     override fun render(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
         guiGraphics.fill(0, 0, width, height, 0xF0101014.toInt())
         guiGraphics.drawCenteredString(font, "曲包编辑器", width / 2, 18, 0xFFFFFFFF.toInt())
+
+        // 按钮文字/可见性实时更新
+        multiSelectButton?.setMessage(Component.literal("多选模式：${if (multiSelectMode) "开" else "关"}"))
+        multiDeleteButton?.setMessage(
+            Component.literal(confirmButtonLabel(ConfirmAction.MULTI_DELETE, " (${selectedForDelete.size})")),
+        )
+        keepOnlyButton?.setMessage(Component.literal(confirmButtonLabel(ConfirmAction.KEEP_ONLY)))
+        cancelButton?.visible = pending != null
+        cancelButton?.active = pending != null
 
         if (packages.isEmpty()) {
             guiGraphics.drawCenteredString(font, status, width / 2, height / 2, 0xFFAAAAAA.toInt())
@@ -190,7 +373,11 @@ class OszEditorScreen(
 
             val d = currentDifficulty()
             if (d != null) {
-                val state = if (d.isDeleted) "【将删除】" else if (d.hasEdits) "【已修改】" else "【未修改】"
+                val state = when {
+                    d.isDeleted -> "【将删除】"
+                    d.hasEdits -> "【已修改】"
+                    else -> "【未修改】"
+                }
                 val color = when {
                     d.isDeleted -> 0xFFFF6666.toInt()
                     d.hasEdits -> 0xFF7FE87F.toInt()
@@ -203,33 +390,77 @@ class OszEditorScreen(
                     32,
                     color,
                 )
-                guiGraphics.drawString(font, "原难度名：${d.originalVersion}", 12, 192, 0xFF888888.toInt())
-                guiGraphics.drawString(font, "谱面音符数：${d.parsed.chart.notes.size}", 12, 206, 0xFF888888.toInt())
+                guiGraphics.drawString(font, "原难度名：${d.originalVersion}", 12, 190, 0xFF888888.toInt())
+                guiGraphics.drawString(font, "谱面音符数：${d.parsed.chart.notes.size}", 12, 204, 0xFF888888.toInt())
             }
 
-            // 难度列表概览
-            var y = 230
-            guiGraphics.drawString(font, "难度列表：", 12, y - 16, 0xFFFFFFFF.toInt())
-            editor?.difficulties?.forEachIndexed { i, diff ->
+            // 难度列表（可滚动）
+            guiGraphics.drawString(font, "难度列表：", 12, listTop - 14, 0xFFFFFFFF.toInt())
+            if (multiSelectMode) {
+                guiGraphics.drawString(font, "（多选模式：点击行勾选）", 80, listTop - 14, 0xFF7FE87F.toInt())
+            }
+
+            rowHits.clear()
+            val maxRows = ((height - 110 - listTop) / 12).coerceAtLeast(1)
+            val diffs = editor?.difficulties ?: emptyList()
+            listScroll = listScroll.coerceIn(0, (diffs.size - maxRows).coerceAtLeast(0))
+            var y = listTop
+            for (i in listScroll until minOf(diffs.size, listScroll + maxRows)) {
+                val diff = diffs[i]
                 val mark = when {
                     diff.isDeleted -> "✗"
                     diff.hasEdits -> "✎"
                     else -> "·"
                 }
+                val box = if (diff.fileName in selectedForDelete) "☑" else "☐"
+                val prefix = if (multiSelectMode) "$box " else ""
                 val c = when {
                     i == difficultyIndex -> 0xFFFFD24A.toInt()
                     diff.isDeleted -> 0xFF666666.toInt()
                     else -> 0xFFAAAAAA.toInt()
                 }
-                guiGraphics.drawString(font, "$mark ${diff.fileName} — ${diff.version}", 20, y, c)
+                guiGraphics.drawString(font, "$prefix$mark ${diff.fileName} — ${diff.version}", 20, y, c)
+                rowHits += RowHit(i, y)
                 y += 12
+            }
+            if (diffs.size > maxRows) {
+                guiGraphics.drawString(
+                    font,
+                    "滚轮翻页  ${listScroll + 1}-${minOf(diffs.size, listScroll + maxRows)}/${diffs.size}",
+                    20,
+                    y,
+                    0xFF777777.toInt(),
+                )
             }
         }
 
         if (status.isNotBlank()) {
-            guiGraphics.drawString(font, status, 180, height - 26, 0xFF7FE87F.toInt())
+            guiGraphics.drawString(font, status, 170, height - 52, 0xFF7FE87F.toInt())
         }
         super.render(guiGraphics, mouseX, mouseY, partialTick)
+    }
+
+    override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
+        if (button == 0 && multiSelectMode) {
+            val hit = rowHits.firstOrNull { mouseY.toInt() in it.y..(it.y + 10) }
+            if (hit != null) {
+                val diff = editor?.difficulties?.getOrNull(hit.index) ?: return super.mouseClicked(mouseX, mouseY, button)
+                if (diff.isDeleted) {
+                    status = "已标记删除的难度不能勾选"
+                } else if (!selectedForDelete.add(diff.fileName)) {
+                    selectedForDelete.remove(diff.fileName)
+                }
+                pending = null
+                return true
+            }
+        }
+        return super.mouseClicked(mouseX, mouseY, button)
+    }
+
+    override fun mouseScrolled(mouseX: Double, mouseY: Double, scrollX: Double, scrollY: Double): Boolean {
+        if (scrollY == 0.0) return false
+        listScroll = (listScroll - scrollY.toInt()).coerceAtLeast(0)
+        return true
     }
 
     override fun isPauseScreen(): Boolean = false
