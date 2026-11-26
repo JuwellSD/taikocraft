@@ -53,7 +53,7 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
                 minecraft?.setScreen(
                     CalibrationScreen(this) { offset ->
                         TaikoCraft.LOGGER.info("校准偏移已应用：{} ms", offset)
-                        TaikoCraftClient.universalOffsetMs = offset
+                        // 由 CalibrationScreen 内部调用 setUniversalOffset 持久化，这里只做日志
                     },
                 )
             }.bounds(width - 130, height - 30, 120, 20).build(),

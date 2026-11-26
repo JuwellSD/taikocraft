@@ -28,11 +28,9 @@ class TaikoCraftClient(modEventBus: IEventBus) {
 
     companion object {
         /** 全局延迟偏移（毫秒），由校准界面写入，持久化到 config/taikocraft/settings.properties */
-        @JvmStatic
         var universalOffsetMs: Double = 0.0
             private set
 
-        @JvmStatic
         val openMenuKey: KeyMapping = KeyMapping(
             "key.taikocraft.open_menu",
             InputConstants.Type.KEYSYM,
