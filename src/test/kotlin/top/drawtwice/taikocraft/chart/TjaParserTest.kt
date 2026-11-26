@@ -253,7 +253,7 @@ class TjaParserTest {
     @Test
     fun `真实谱面回归 - Yuugen no Ran Hard 前 12 小节`() {
         // 夹具来自真实 TJA（160 BPM, OFFSET -1.816, 12 字符/小节）
-        val text = javaClass.getResourceAsStream("/tja/yuugen_hard_head.tja")!!
+        val text = TjaParserTest::class.java.getResourceAsStream("/tja/yuugen_hard_head.tja")!!
             .readBytes()
         val file = TjaParser.parse(text)
         val chart = file.charts[0]
