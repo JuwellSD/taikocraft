@@ -140,6 +140,36 @@ class TaikoScreen(
             if (note.player == 1) debugVisibleNotes++
         }
 
+        // ---- 命中特效：打中即爆开 ----
+        // 位置固定在判定线附近（命中瞬间音符就在那里）
+        for (fx in session.hitFx) {
+            val age = session.judgeTimeMs - fx.startMs
+            if (age < 0 || age > 400) continue          // 400ms 生命周期
+            val t = (age / 400.0).toFloat()             // 0..1 进度
+            val baseX = laneLeft + 26
+            val baseY = if (fx.color == NoteColor.DON) cy1 else cy1
+            val col = if (fx.color == NoteColor.DON) donColor else kaColor
+            val alpha = ((1f - t) * 255).toInt().coerceIn(0, 255) shl 24
+            val maxR = if (fx.big) 34 else 24
+            val r = (6 + maxR * t).toInt()
+
+            // 1) 扩散圆环
+            drawRing(guiGraphics, baseX, baseY, r, 3, alpha or (col and 0xFFFFFF))
+            // 2) 四向爆开线条
+            val len = (4 + 18 * t).toInt()
+            val lw = (3 * (1f - t)).toInt().coerceAtLeast(1)
+            val c = alpha or (col and 0xFFFFFF)
+            guiGraphics.fill(baseX - r - len, baseY - lw / 2, baseX - r, baseY + lw / 2 + 1, c)
+            guiGraphics.fill(baseX + r, baseY - lw / 2, baseX + r + len, baseY + lw / 2 + 1, c)
+            guiGraphics.fill(baseX - lw / 2, baseY - r - len, baseX + lw / 2 + 1, baseY - r, c)
+            guiGraphics.fill(baseX - lw / 2, baseY + r, baseX + lw / 2 + 1, baseY + r + len, c)
+            // 3) 中心闪光（前 100ms）
+            if (age < 100) {
+                val flashA = ((1f - age.toFloat() / 100f) * 200).toInt().coerceIn(0, 255) shl 24
+                drawDisc(guiGraphics, baseX, baseY, (maxR * 0.5).toInt(), flashA or 0xFFFFFF, fillHeight = 1)
+            }
+        }
+
         // ---- 判定文字（判定线右侧）----
         val result = session.lastResult
         if (result != null && session.judgeTimeMs - session.lastResultAtMs < 450) {
@@ -170,6 +200,10 @@ class TaikoScreen(
         ); dy += 11
         guiGraphics.drawString(font, "目押 ${"%.0f".format(session.clock.visualOffsetMs)} / 音押 ${"%.0f".format(session.clock.audioOffsetMs)}ms", 6, dy, 0xFF888888.toInt()); dy += 11
         guiGraphics.drawString(font, "可见音符: $debugVisibleNotes", 6, dy, 0xFF888888.toInt())
+        dy += 11
+        if (session.autoPlay) {
+            guiGraphics.drawString(font, "★ AUTO PLAY (OP)", 6, dy, 0xFFFFD24A.toInt())
+        }
 
         // ---- 左侧面板文字 ----
         guiGraphics.drawString(font, "1P", 8, lane1Top + 6, 0xFF3A2010.toInt())

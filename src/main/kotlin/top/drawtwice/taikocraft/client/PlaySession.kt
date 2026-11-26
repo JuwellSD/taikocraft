@@ -3,6 +3,8 @@ package top.drawtwice.taikocraft.client
 import top.drawtwice.taikocraft.audio.OpenAlPlayback
 import top.drawtwice.taikocraft.audio.PlaybackClock
 import top.drawtwice.taikocraft.chart.Chart
+import top.drawtwice.taikocraft.chart.NoteColor
+import top.drawtwice.taikocraft.judge.Side
 import top.drawtwice.taikocraft.chart.TjaChartFile
 import top.drawtwice.taikocraft.judge.InputEvent
 import top.drawtwice.taikocraft.judge.JudgeConfig
@@ -37,11 +39,37 @@ class PlaySession(
     var lastResultAtMs: Double = -1.0
         private set
 
+    /**
+     * 命中特效（打中即爆开并消失）。
+     * 每次命中追加一条，界面按时间淡出，过期自动清理。
+     */
+    data class HitFx(
+        val startMs: Double,
+        val color: top.drawtwice.taikocraft.chart.NoteColor,
+        val big: Boolean,
+        val judgment: top.drawtwice.taikocraft.judge.Judgment,
+    )
+
+    private val _hitFx = mutableListOf<HitFx>()
+    val hitFx: List<HitFx> get() = _hitFx
+
     /** 输入时间戳换算用的锚点 */
     private var anchorNanoTime: Long = 0L
     private var anchorJudgeTimeMs: Double = 0.0
 
     var volume: Float = 1.0f
+
+    /**
+     * 自动演奏（仅 OP 可开）。
+     * 开启后模拟输入：每个音符到点时自动调用 judge.press()，判定为 Perfect。
+     */
+    var autoPlay: Boolean = false
+        set(value) {
+            field = value
+            if (value) autoCursor = 0
+        }
+
+    private var autoCursor = 0
 
     /** 渲染用时间（受目押偏移影响） */
     val renderTimeMs: Double get() = clock.chartTimeVisualMs
@@ -89,10 +117,42 @@ class PlaySession(
             judge.press(InputEvent(hit.color, hit.side, judgeTime))?.let { result ->
                 lastResult = result
                 lastResultAtMs = judgeTime
+                // 记录特效（连打/气球也爆，但用音符时间更自然）
+                _hitFx += HitFx(judgeTime, result.color, result.big, result.judgment)
             }
         }
+        // ---- Autoplay：自动敲击 ----
+        if (autoPlay) {
+            val now = clock.chartTimeJudgeMs
+            val notes = judge.notesSnapshot()
+            while (autoCursor < notes.size && notes[autoCursor].timeMs <= now) {
+                val note = notes[autoCursor]
+                if (!judge.isJudged(autoCursor)) {
+                    val side = Side.LEFT
+                    judge.press(InputEvent(note.color, side, note.timeMs))?.let { result ->
+                        lastResult = result
+                        lastResultAtMs = note.timeMs
+                        _hitFx += HitFx(note.timeMs, note.color, note.big, result.judgment)
+                    }
+                    // 大音符补第二只手
+                    if (note.big) {
+                        judge.press(InputEvent(note.color, Side.RIGHT, note.timeMs))?.let { result ->
+                            lastResult = result
+                            lastResultAtMs = note.timeMs
+                            _hitFx += HitFx(note.timeMs, note.color, note.big, result.judgment)
+                        }
+                    }
+                }
+                autoCursor++
+            }
+        }
+
         // Miss 判定也走判定时钟
         judge.advanceTo(clock.chartTimeJudgeMs)
+
+        // 清理 1 秒前的特效
+        val cutoff = clock.chartTimeJudgeMs - 1000.0
+        _hitFx.removeAll { it.startMs < cutoff }
     }
 
     /** 判定进度 0..1 */

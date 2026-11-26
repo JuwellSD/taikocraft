@@ -33,6 +33,9 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
     private var visualBox: EditBox? = null
     private var audioBox: EditBox? = null
 
+    /** Autoplay 开关（仅 OP 可用） */
+    private var autoPlayEnabled = false
+
     override fun init() {
         songs = runCatching { library.listSongs() }
             .onFailure { statusMessage = "扫描曲库失败：${it.message}" }
@@ -47,6 +50,16 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
             Button.builder(Component.literal("导入曲目")) {
                 minecraft?.setScreen(ImportScreen(this))
             }.bounds(96, height - 56, 80, 20).build(),
+        )
+        addRenderableWidget(
+            Button.builder(Component.literal("曲库管理")) {
+                minecraft?.setScreen(SongLibraryScreen(this))
+            }.bounds(width - 480, height - 30, 110, 20).build(),
+        )
+        addRenderableWidget(
+            Button.builder(Component.literal("键位设置")) {
+                minecraft?.setScreen(KeyBindingScreen(this))
+            }.bounds(width - 590, height - 30, 110, 20).build(),
         )
         addRenderableWidget(
             Button.builder(Component.literal("曲包编辑器")) {
@@ -104,6 +117,17 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
                 applyOffsets(audio = TaikoCraftClient.audioOffsetMs + 5)
                 audioBox?.setValue(TaikoCraftClient.audioOffsetMs.toInt().toString())
             }.bounds(width - 135, boxY - 22, 40, 18).build(),
+        )
+
+        addRenderableWidget(
+            Button.builder(Component.literal("AUTO: 关")) { btn ->
+                if (!AutoPlayPermission.canUse()) {
+                    statusMessage = "AutoPlay 需要 OP 权限（等级 2）"
+                    return@builder
+                }
+                autoPlayEnabled = !autoPlayEnabled
+                btn.message = Component.literal(if (autoPlayEnabled) "AUTO: 开" else "AUTO: 关")
+            }.bounds(186, height - 56, 90, 20).build(),
         )
 
         addRenderableWidget(
@@ -250,6 +274,8 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
         val session = PlaySession(chartFile, chart, playback)
         session.clock.visualOffsetMs = TaikoCraftClient.visualOffsetMs
         session.clock.audioOffsetMs = TaikoCraftClient.audioOffsetMs
+        // Autoplay 二次校验（按钮可能被绕过）
+        session.autoPlay = autoPlayEnabled && AutoPlayPermission.canUse()
         difficultyHitboxes.clear()
         minecraft?.setScreen(TaikoScreen(session, this))
     }

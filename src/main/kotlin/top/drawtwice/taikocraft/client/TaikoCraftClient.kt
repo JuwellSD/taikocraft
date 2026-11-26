@@ -68,6 +68,18 @@ class TaikoCraftClient(modEventBus: IEventBus) {
                 visualOffsetMs = props.getProperty("visualOffsetMs")?.toDoubleOrNull() ?: legacy ?: 0.0
                 audioOffsetMs = props.getProperty("audioOffsetMs")?.toDoubleOrNull() ?: legacy ?: 0.0
                 TaikoCraft.LOGGER.info("已加载偏移：目押 {} ms，音押 {} ms", visualOffsetMs, audioOffsetMs)
+                // 键位
+                val ld = props.getProperty("key.leftDon")?.toIntOrNull()
+                val lk = props.getProperty("key.leftKa")?.toIntOrNull()
+                val rd = props.getProperty("key.rightDon")?.toIntOrNull()
+                val rk = props.getProperty("key.rightKa")?.toIntOrNull()
+                if (ld != null && lk != null && rd != null && rk != null) {
+                    top.drawtwice.taikocraft.client.input.TaikoKeyConfig.mapping =
+                        top.drawtwice.taikocraft.client.input.KeyMapping(ld, lk, rd, rk)
+                    top.drawtwice.taikocraft.client.input.TaikoKeyConfig.scheme =
+                        top.drawtwice.taikocraft.client.input.KeyScheme.CUSTOM
+                    TaikoCraft.LOGGER.info("已加载自定义键位")
+                }
             }.onFailure {
                 TaikoCraft.LOGGER.warn("读取设置失败：{}", it.message)
             }
@@ -80,6 +92,12 @@ class TaikoCraftClient(modEventBus: IEventBus) {
                 val props = java.util.Properties()
                 props.setProperty("visualOffsetMs", visualOffsetMs.toString())
                 props.setProperty("audioOffsetMs", audioOffsetMs.toString())
+                // 键位
+                val m = top.drawtwice.taikocraft.client.input.TaikoKeyConfig.mapping
+                props.setProperty("key.leftDon", m.leftDon.toString())
+                props.setProperty("key.leftKa", m.leftKa.toString())
+                props.setProperty("key.rightDon", m.rightDon.toString())
+                props.setProperty("key.rightKa", m.rightKa.toString())
                 Files.newOutputStream(path).use { props.store(it, "TaikoCraft settings") }
             }.onFailure {
                 TaikoCraft.LOGGER.warn("保存设置失败：{}", it.message)
