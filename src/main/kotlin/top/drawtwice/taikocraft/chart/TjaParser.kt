@@ -40,7 +40,7 @@ object TjaParser {
         val charts = mutableListOf<Chart>()
         for (block in blocks) {
             val merged = header + block.headerPart
-            charts += parseChartBlock(merged, block.body, block.courseName)
+            charts.add(parseChartBlock(merged, block.body, block.courseName))
         }
         require(charts.isNotEmpty()) { "TJA 里没有任何谱面块" }
 

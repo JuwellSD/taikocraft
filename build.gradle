@@ -35,8 +35,8 @@ kotlin {
 tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
-        // KFF 自身也用这个标志；主流 mod 环境不需要显式 API 模式之外的东西
-        freeCompilerArgs.add('-Xjvm-default=all')
+        // 生成默认方法，避免 mod 接口在 Kotlin/Java 混用时的兼容问题
+        freeCompilerArgs.add('-jvm-default=all')
     }
 }
 

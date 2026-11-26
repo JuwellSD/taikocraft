@@ -10,9 +10,9 @@ import top.drawtwice.taikocraft.TaikoCraft
 
 /**
  * 客户端专用入口。
- * `dist = Dist.CLIENT` 保证专用服务器不会加载本类。
+ * `dist = [Dist.CLIENT]` 保证专用服务器不会加载本类。
  */
-@Mod(value = TaikoCraft.MOD_ID, dist = Dist.CLIENT)
+@Mod(value = TaikoCraft.MOD_ID, dist = [Dist.CLIENT])
 @EventBusSubscriber(modid = TaikoCraft.MOD_ID, bus = EventBusSubscriber.Bus.MOD, value = [Dist.CLIENT])
 object TaikoCraftClient {
 
