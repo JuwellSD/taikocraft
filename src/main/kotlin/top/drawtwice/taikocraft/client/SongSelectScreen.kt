@@ -18,12 +18,12 @@ import kotlin.io.path.name
 /**
  * 选曲界面：扫描本地曲库 → 选择歌曲/难度 → 进入 [TaikoScreen]。
  */
-class SongSelectScreen(private val previous: Screen? = null) : Screen(Component.literal("选曲")) {
+class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(Component.literal("选曲")) {
 
     private val library = SongLibrary(SongLibrary.defaultRoot())
     private var songs: List<SongLibrary.SongEntry> = emptyList()
     private var scrollOffset = 0
-    private var statusMessage: String = ""
+    private var statusMessage = ""
 
     /** 每页条目数 */
     private val pageSize = 8
@@ -69,24 +69,17 @@ class SongSelectScreen(private val previous: Screen? = null) : Screen(Component.
         )
     }
 
-    override fun render(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
-        guiGraphics.fill(0, 0, width, height, 0xF0101014.toInt())
+    override fun renderContent(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
         guiGraphics.drawCenteredString(font, "选曲", width / 2, 18, 0xFFFFFFFF.toInt())
 
+        difficultyHitboxes.clear()
         if (songs.isEmpty()) {
             guiGraphics.drawCenteredString(
                 font,
-                "曲库为空。把曲目文件夹放到：${SongLibrary.defaultRoot()}",
+                "曲库为空。点「导入曲目」或把文件放进 config/taikocraft/import/",
                 width / 2,
                 height / 2 - 10,
                 0xFFAAAAAA.toInt(),
-            )
-            guiGraphics.drawCenteredString(
-                font,
-                "每个文件夹放 .tja 或 .osu + 音频（ogg/wav）",
-                width / 2,
-                height / 2 + 8,
-                0xFF777777.toInt(),
             )
         } else {
             val visible = songs.drop(scrollOffset).take(pageSize)
@@ -102,7 +95,6 @@ class SongSelectScreen(private val previous: Screen? = null) : Screen(Component.
                     for (diff in song.difficulties) {
                         val label = "${diff.name} Lv.${diff.level}"
                         val btnWidth = font.width(label) + 12
-                        // 用文字热区的方式简化：直接绘制 + 记录位置
                         guiGraphics.fill(x - 3, y - 2, x + btnWidth, y + 10, 0xFF2A2A33.toInt())
                         guiGraphics.drawString(font, label, x, y, 0xFF7FE87F.toInt())
                         difficultyHitboxes += Hitbox(song, diff, x - 3, y - 2, x + btnWidth, y + 10)
@@ -128,8 +120,6 @@ class SongSelectScreen(private val previous: Screen? = null) : Screen(Component.
                 0xFFAAAAAA.toInt(),
             )
         }
-
-        super.render(guiGraphics, mouseX, mouseY, partialTick)
     }
 
     private data class Hitbox(
@@ -144,7 +134,8 @@ class SongSelectScreen(private val previous: Screen? = null) : Screen(Component.
 
     override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
         if (button != 0) return super.mouseClicked(mouseX, mouseY, button)
-        val hit = difficultyHitboxes.firstOrNull { it.contains(mouseX.toInt(), mouseY.toInt()) } ?: return super.mouseClicked(mouseX, mouseY, button)
+        val hit = difficultyHitboxes.firstOrNull { it.contains(mouseX.toInt(), mouseY.toInt()) }
+            ?: return super.mouseClicked(mouseX, mouseY, button)
         startPlay(hit.song, hit.diff)
         return true
     }

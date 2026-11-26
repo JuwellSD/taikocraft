@@ -26,7 +26,7 @@ import kotlin.io.path.nameWithoutExtension
  */
 data class Importable(val file: Path, val companionAudio: Path?)
 
-class ImportScreen(private val previous: Screen? = null) : Screen(Component.literal("导入曲目")) {
+class ImportScreen(private val previous: Screen? = null) : TaikoScreenBase(Component.literal("导入曲目")) {
 
     private var items: List<Importable> = emptyList()
     private var status = ""
@@ -62,8 +62,7 @@ class ImportScreen(private val previous: Screen? = null) : Screen(Component.lite
         }
     }
 
-    override fun render(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
-        guiGraphics.fill(0, 0, width, height, 0xF0101014.toInt())
+    override fun renderContent(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
         guiGraphics.drawCenteredString(font, "导入曲目", width / 2, 18, 0xFFFFFFFF.toInt())
 
         guiGraphics.drawString(font, "投放目录：${ImportStore.importDir()}", 12, 38, 0xFF888888.toInt())
@@ -106,7 +105,6 @@ class ImportScreen(private val previous: Screen? = null) : Screen(Component.lite
         if (status.isNotBlank()) {
             guiGraphics.drawString(font, status, 90, height - 46, statusColor)
         }
-        super.render(guiGraphics, mouseX, mouseY, partialTick)
     }
 
     override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {

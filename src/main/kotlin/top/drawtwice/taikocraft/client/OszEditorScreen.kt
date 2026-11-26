@@ -22,7 +22,7 @@ import java.nio.file.Path
  */
 class OszEditorScreen(
     private val previous: Screen? = null,
-) : Screen(Component.literal("曲包编辑器")) {
+) : TaikoScreenBase(Component.literal("曲包编辑器")) {
 
     private var packages: List<Path> = emptyList()
     private var packageIndex = 0
@@ -352,8 +352,7 @@ class OszEditorScreen(
 
     private val listTop = 226
 
-    override fun render(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
-        guiGraphics.fill(0, 0, width, height, 0xF0101014.toInt())
+    override fun renderContent(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
         guiGraphics.drawCenteredString(font, "曲包编辑器", width / 2, 18, 0xFFFFFFFF.toInt())
 
         // 按钮文字/可见性实时更新
@@ -437,7 +436,6 @@ class OszEditorScreen(
         if (status.isNotBlank()) {
             guiGraphics.drawString(font, status, 170, height - 52, 0xFF7FE87F.toInt())
         }
-        super.render(guiGraphics, mouseX, mouseY, partialTick)
     }
 
     override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {

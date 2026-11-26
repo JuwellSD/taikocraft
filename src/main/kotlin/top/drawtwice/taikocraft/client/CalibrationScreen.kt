@@ -21,7 +21,7 @@ import kotlin.math.roundToInt
 class CalibrationScreen(
     private val previous: Screen? = null,
     private val onApplied: (Double) -> Unit = {},
-) : Screen(Component.literal("延迟校准")) {
+) : TaikoScreenBase(Component.literal("延迟校准")) {
 
     private val beatIntervalMs = 600.0
     private val maxSamples = 16
@@ -56,8 +56,7 @@ class CalibrationScreen(
         )
     }
 
-    override fun render(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
-        guiGraphics.fill(0, 0, width, height, 0xF0101014.toInt())
+    override fun renderContent(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
 
         val nowMs = (System.nanoTime() - startNanos) / 1_000_000.0
         val beatIndex = (nowMs / beatIntervalMs).toInt()
@@ -127,7 +126,6 @@ class CalibrationScreen(
             height - 55,
             0xFFFFFFFF.toInt(),
         )
-        super.render(guiGraphics, mouseX, mouseY, partialTick)
     }
 
     override fun isPauseScreen(): Boolean = false

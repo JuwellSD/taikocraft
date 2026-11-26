@@ -19,7 +19,7 @@ import kotlin.math.abs
 class TaikoScreen(
     private val session: PlaySession,
     previous: Screen? = null,
-) : Screen(Component.literal("TaikoCraft")) {
+) : TaikoScreenBase(Component.literal("TaikoCraft")) {
 
     // 配色（红咚 / 蓝咔，参照实机）
     private val donColor = 0xFFE8453C.toInt()
@@ -38,10 +38,7 @@ class TaikoScreen(
         session.start()
     }
 
-    override fun render(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
-        // 全屏半透明底
-        guiGraphics.fill(0, 0, width, height, 0xF0101014.toInt())
-
+    override fun renderContent(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
         session.tick()
 
         val now = session.clock.chartTimeMs
@@ -123,7 +120,6 @@ class TaikoScreen(
         guiGraphics.fill(trackLeft, barTop, trackRight, barTop + 4, 0xFF333333.toInt())
         guiGraphics.fill(trackLeft, barTop, trackLeft + ((trackRight - trackLeft) * progress).toInt(), barTop + 4, 0xFF66CCFF.toInt())
 
-        super.render(guiGraphics, mouseX, mouseY, partialTick)
     }
 
     override fun isPauseScreen(): Boolean = false
