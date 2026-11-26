@@ -52,7 +52,7 @@ data class KeyMapping(
             KeyScheme.BEGINNER -> KeyMapping(leftDon = KEY_F, leftKa = KEY_D, rightDon = KEY_J, rightKa = KEY_K)
             // 老手：左咔 R，左咚 F，右咚 J，右咔 I
             KeyScheme.EXPERT -> KeyMapping(leftDon = KEY_F, leftKa = KEY_R, rightDon = KEY_J, rightKa = KEY_I)
-            KeyScheme.CUSTOM -> of(BEGINNER)
+            KeyScheme.CUSTOM -> of(KeyScheme.BEGINNER)
         }
 
         /** 旧版 GLFW 键码转 InputConstants.Key 便于显示 */

@@ -27,7 +27,7 @@ object Mp3Decoder {
      * 解码为 16bit PCM。
      * 输出统一转换为 16bit 小端、原始声道数。
      */
-    fun decode(bytes: ByteArray): OpenAlPlayback.DecodedPcm {
+    fun decode(bytes: ByteArray): OpenAlPlayback.Companion.DecodedPcm {
         val reader = MpegAudioFileReader()
         AudioSystem.getAudioInputStream(ByteArrayInputStream(bytes)).use { /* 验证可识别 */ }
 
@@ -51,7 +51,7 @@ object Mp3Decoder {
                 shorts[j++] = ((data[i + 1].toInt() shl 8) or (data[i].toInt() and 0xFF)).toShort()
                 i += 2
             }
-            return OpenAlPlayback.DecodedPcm(
+            return OpenAlPlayback.Companion.DecodedPcm(
                 ShortBuffer.wrap(shorts, 0, j),
                 format.sampleRate.toInt(),
                 format.channels,
@@ -59,7 +59,7 @@ object Mp3Decoder {
         }
     }
 
-    fun decode(path: Path): OpenAlPlayback.DecodedPcm =
+    fun decode(path: Path): OpenAlPlayback.Companion.DecodedPcm =
         decode(java.nio.file.Files.readAllBytes(path))
 
     @Suppress("unused")
