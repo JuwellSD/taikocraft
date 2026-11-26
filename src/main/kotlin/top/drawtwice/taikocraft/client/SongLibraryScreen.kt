@@ -41,9 +41,6 @@ class SongLibraryScreen(private val previous: Screen? = null) : TaikoScreenBase(
                 .bounds(cx - 120, height - 30, 110, 20).build(),
         )
         addRenderableWidget(
-
-        )
-        addRenderableWidget(
             Button.builder(Component.literal("← 返回")) { minecraft?.setScreen(previous) }
                 .bounds(width - 90, height - 30, 80, 20).build(),
         )
