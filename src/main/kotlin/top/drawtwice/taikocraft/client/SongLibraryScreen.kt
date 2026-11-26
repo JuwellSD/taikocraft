@@ -7,6 +7,7 @@ import net.minecraft.network.chat.Component
 import top.drawtwice.taikocraft.TaikoCraft
 import top.drawtwice.taikocraft.chart.SongLibrary
 import top.drawtwice.taikocraft.chart.SongLibraryManager
+import kotlin.io.path.extension
 
 /**
  * 曲库管理界面：删曲目 / 删单个难度 / 改显示标题。
