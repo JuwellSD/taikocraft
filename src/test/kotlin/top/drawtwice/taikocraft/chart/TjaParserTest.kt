@@ -265,15 +265,15 @@ class TjaParserTest {
 
     @Test
     fun `行尾注释被正确剥离`() {
-        // "1111,//55" → 数据部分 "1111,"（注释去掉）
-        // 若不剥离注释，"//55" 会被当成字符推进时间轴
-        val withComment = TjaParser.parse(tja(body = "1111,//55
-1111"))
-        val withoutComment = TjaParser.parse(tja(body = "1111,
-1111"))
+        // 关键：注释被删掉后，本行字符数不变 → 时间轴应与无注释版本一致
+        // "1111,//55" 剥离后数据部分是 "1111,"（5 字符）
+        // "1111," 本身就是 5 字符
+        val withComment = TjaParser.parse(tja(body = "1111,//55" + "\n" + "1111"))
+        val withoutComment = TjaParser.parse(tja(body = "1111," + "\n" + "1111"))
         val a = withComment.charts[0].notes.map { it.timeMs }
         val b = withoutComment.charts[0].notes.map { it.timeMs }
         assertEquals(b, a, "行尾注释不应影响时间轴")
+        assertEquals(8, a.size)
     }
 
     @Test
