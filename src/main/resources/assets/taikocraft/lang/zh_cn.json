@@ -1,7 +1,4 @@
 {
-  "modmenu.nameTranslation.taikocraft": "太鼓工坊",
-  "taikocraft.configuration.title": "太鼓工坊 设置",
-  "taikocraft.configuration.section.taikocraft.client.toml": "客户端设置",
-  "taikocraft.configuration.section.taikocraft.client.toml.title": "客户端设置",
-  "taikocraft.configuration.language": "语言"
+  "key.taikocraft.open_menu": "打开太鼓选曲",
+  "key.categories.taikocraft": "太鼓工坊"
 }
