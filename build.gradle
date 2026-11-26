@@ -35,8 +35,8 @@ kotlin {
 tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
-        // 生成默认方法，避免 mod 接口在 Kotlin/Java 混用时的兼容问题
-        freeCompilerArgs.add('-jvm-default=all')
+        // 生成 JVM 默认方法，避免 Kotlin 接口与 Java 实现混用时的兼容问题
+        jvmDefault.set(org.jetbrains.kotlin.gradle.dsl.JvmDefaultMode.NO_COMPATIBILITY)
     }
 }
 
