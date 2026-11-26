@@ -39,6 +39,11 @@ class SongSelectScreen(private val previous: Screen? = null) : Screen(Component.
             }.bounds(10, height - 30, 80, 20).build(),
         )
         addRenderableWidget(
+            Button.builder(Component.literal("曲包编辑器")) {
+                minecraft?.setScreen(OszEditorScreen(this))
+            }.bounds(width - 250, height - 30, 110, 20).build(),
+        )
+        addRenderableWidget(
             Button.builder(Component.literal("延迟校准")) {
                 minecraft?.setScreen(
                     CalibrationScreen(this) { offset ->
