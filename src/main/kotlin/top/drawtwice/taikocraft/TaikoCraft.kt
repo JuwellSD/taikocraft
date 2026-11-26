@@ -2,7 +2,6 @@ package top.drawtwice.taikocraft
 
 import net.neoforged.bus.api.IEventBus
 import net.neoforged.fml.common.Mod
-import net.neoforged.neoforge.common.NeoForge
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 
@@ -26,6 +25,8 @@ class TaikoCraft(modEventBus: IEventBus) {
 
     init {
         LOGGER.info("TaikoCraft 加载中……（Phase 1）")
-        NeoForge.EVENT_BUS.register(this)
+        // 注意：不要在这里调用 NeoForge.EVENT_BUS.register(this)——
+        // 本类没有 @SubscribeEvent 方法，NeoForge 的事件总线会直接抛
+        // IllegalArgumentException。事件监听统一放在 TaikoCraftClient。
     }
 }
