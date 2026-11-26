@@ -5,7 +5,6 @@ import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.Component
-import net.minecraft.util.FormattedCharSequence
 import top.drawtwice.taikocraft.TaikoCraft
 import top.drawtwice.taikocraft.chart.OszEditor
 import top.drawtwice.taikocraft.chart.OszStorage
@@ -44,7 +43,7 @@ class OszEditorScreen(
             loadPackage(packages[packageIndex])
         }
 
-        rebuildWidgets()
+        buildLayout()
     }
 
     private fun loadPackage(path: Path) {
@@ -61,7 +60,7 @@ class OszEditorScreen(
     private fun currentDifficulty(): OszEditor.Difficulty? =
         editor?.difficulties?.getOrNull(difficultyIndex)
 
-    private fun rebuildWidgets() {
+    private fun buildLayout() {
         clearWidgets()
         val top = 44
 
@@ -71,7 +70,7 @@ class OszEditorScreen(
                 if (packages.isNotEmpty()) {
                     packageIndex = (packageIndex - 1 + packages.size) % packages.size
                     loadPackage(packages[packageIndex])
-                    rebuildWidgets()
+                    buildLayout()
                 }
             }.bounds(10, top, 70, 20).build(),
         )
@@ -80,7 +79,7 @@ class OszEditorScreen(
                 if (packages.isNotEmpty()) {
                     packageIndex = (packageIndex + 1) % packages.size
                     loadPackage(packages[packageIndex])
-                    rebuildWidgets()
+                    buildLayout()
                 }
             }.bounds(86, top, 70, 20).build(),
         )
@@ -111,7 +110,6 @@ class OszEditorScreen(
             setMaxLength(200)
             setValue(currentDifficulty()?.title ?: "")
             setResponder { currentDifficulty()?.setTitle(it) }
-            addFormatter { raw, _ -> FormattedCharSequence.forward(raw, style) }
         }
         artistBox = EditBox(font, boxX, 106, boxW, 18, Component.literal("歌手")).apply {
             setMaxLength(200)
@@ -235,6 +233,4 @@ class OszEditorScreen(
     }
 
     override fun isPauseScreen(): Boolean = false
-
-    private val style = net.minecraft.network.chat.Style.EMPTY
 }
