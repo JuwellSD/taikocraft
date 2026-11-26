@@ -74,6 +74,8 @@ class TaikoScreen(
         val lane2Top = lane1Bottom + stripH
         val lane2Bottom = lane2Top + trackH
         val laneWidth = (laneRight - laneLeft).coerceAtLeast(1)
+        // ★ 判定线位置：音符 x=0 时正好在这里。必须与音符绘制起点一致
+        val judgeX = laneLeft
         // 自适应：让基准 BPM 下的「4 拍」约占轨道宽度的 1/4
         val pxPer4Beats = (laneWidth / 4.0).coerceAtLeast(40.0)
 
@@ -92,10 +94,10 @@ class TaikoScreen(
         guiGraphics.fill(laneLeft, lane1Bottom, laneRight, lane2Top, centerStrip)
 
         // ---- 小节线（白竖线）----
-        // 小节线用谱面初始 BPM 估算位置（变速点上会有偏差，Phase 1 可接受）
+        // ★ 小节线用它自己所在位置的 BPM，否则变速段会与音符错位
         for (bar in session.chart.barLines) {
             val d = bar.timeMs - now
-            val n4 = d * session.chart.bpm / 240000.0
+            val n4 = d * bar.bpmAtBar / 240000.0
             val x = laneLeft + (n4 * pxPer4Beats).toInt()
             if (x < laneLeft || x > laneRight) continue
             guiGraphics.fill(x, lane1Top, x + 1, lane1Bottom, 0x80FFFFFF.toInt())
@@ -103,8 +105,8 @@ class TaikoScreen(
         }
 
         // ---- 判定线（左侧同心双环，参考图第二张）----
-        drawJudgeMarker(guiGraphics, laneLeft + 26, (lane1Top + lane1Bottom) / 2, trackH)
-        drawJudgeMarker(guiGraphics, laneLeft + 26, (lane2Top + lane2Bottom) / 2, trackH)
+        drawJudgeMarker(guiGraphics, judgeX, (lane1Top + lane1Bottom) / 2, trackH)
+        drawJudgeMarker(guiGraphics, judgeX, (lane2Top + lane2Bottom) / 2, trackH)
 
         // ---- 音符 ----
         val notes = session.judge.notesSnapshot()
@@ -146,7 +148,7 @@ class TaikoScreen(
             val age = session.judgeTimeMs - fx.startMs
             if (age < 0 || age > 400) continue          // 400ms 生命周期
             val t = (age / 400.0).toFloat()             // 0..1 进度
-            val baseX = laneLeft + 26
+            val baseX = judgeX
             val baseY = if (fx.color == NoteColor.DON) cy1 else cy1
             val col = if (fx.color == NoteColor.DON) donColor else kaColor
             val alpha = ((1f - t) * 255).toInt().coerceIn(0, 255) shl 24
@@ -185,7 +187,7 @@ class TaikoScreen(
                 Judgment.POOR -> 0xFFAAAAAA.toInt()
                 Judgment.MISS -> 0xFFFF5555.toInt()
             }
-            guiGraphics.drawCenteredString(font, text, laneLeft + 80, cy1 - 40, color)
+            guiGraphics.drawCenteredString(font, text, judgeX + 70, cy1 - 40, color)
         }
 
         // ---- 左上角调试信息（对齐参考图）----
@@ -225,7 +227,8 @@ class TaikoScreen(
 
     /** 判定线标记：同心双环（参考图左侧的灰色双圈） */
     private fun drawJudgeMarker(g: GuiGraphics, cx: Int, cy: Int, trackH: Int) {
-        val r = (trackH * 0.38).toInt().coerceIn(10, 26)
+        // 与小音符同大小（小音符 r=11）
+        val r = 13
         drawRing(g, cx, cy, r, 2, judgeRingColor and 0xB0FFFFFF.toInt())
         drawRing(g, cx, cy, r - 5, 2, judgeRingColor and 0x70FFFFFF.toInt())
     }

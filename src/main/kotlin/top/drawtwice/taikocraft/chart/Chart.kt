@@ -49,8 +49,12 @@ data class BalloonSegment(
     val player: Int = 1,
 )
 
-/** 小节线（用于渲染） */
-data class BarLine(val timeMs: Double)
+/**
+ * 小节线（用于渲染）。
+ * @param timeMs 小节线时刻
+ * @param bpmAtBar 该小节处的 BPM（变速段渲染需要）
+ */
+data class BarLine(val timeMs: Double, val bpmAtBar: Double = 120.0)
 
 /**
  * 一个难度的谱面。

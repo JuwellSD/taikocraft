@@ -78,6 +78,8 @@ class PlaySession(
     val judgeTimeMs: Double get() = clock.chartTimeJudgeMs
 
     fun start() {
+        // ★ 清空进入游戏前积压的按键，否则第一帧会一次性处理多个（"一下打三个"）
+        KeyInputBuffer.clear()
         clock.start()
         playback?.play()
         playback?.setVolume(volume)

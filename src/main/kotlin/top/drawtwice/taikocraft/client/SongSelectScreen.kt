@@ -41,84 +41,31 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
             .onFailure { statusMessage = "扫描曲库失败：${it.message}" }
             .getOrDefault(emptyList())
 
+        // ============================================================
+        // 布局：底部四行，行高 24，互不重叠
+        //   行1: 上一页 / 下一页 / 导入曲目 / AUTO
+        //   行2: 目押 [框] -5 +5   音押 [框] -5 +5
+        //   行3: 返回 / 键位设置 / 曲包编辑器 / 曲库管理 / 延迟校准
+        // ============================================================
+        val row1 = height - 100
+        val row2 = height - 72
+        val row3 = height - 32
+        val btnH = 20
+
         addRenderableWidget(
-            Button.builder(Component.literal("← 返回")) {
-                minecraft?.setScreen(previous)
-            }.bounds(10, height - 30, 80, 20).build(),
+            Button.builder(Component.literal("上一页")) { scrollOffset = (scrollOffset - pageSize).coerceAtLeast(0) }
+                .bounds(10, row1, 70, btnH).build(),
+        )
+        addRenderableWidget(
+            Button.builder(Component.literal("下一页")) {
+                if (scrollOffset + pageSize < songs.size) scrollOffset += pageSize
+            }.bounds(86, row1, 70, btnH).build(),
         )
         addRenderableWidget(
             Button.builder(Component.literal("导入曲目")) {
                 minecraft?.setScreen(ImportScreen(this))
-            }.bounds(96, height - 56, 80, 20).build(),
+            }.bounds(162, row1, 80, btnH).build(),
         )
-        addRenderableWidget(
-            Button.builder(Component.literal("曲库管理")) {
-                minecraft?.setScreen(SongLibraryScreen(this))
-            }.bounds(width - 480, height - 30, 110, 20).build(),
-        )
-        addRenderableWidget(
-            Button.builder(Component.literal("键位设置")) {
-                minecraft?.setScreen(KeyBindingScreen(this))
-            }.bounds(width - 590, height - 30, 110, 20).build(),
-        )
-        addRenderableWidget(
-            Button.builder(Component.literal("曲包编辑器")) {
-                minecraft?.setScreen(OszEditorScreen(this))
-            }.bounds(width - 370, height - 30, 110, 20).build(),
-        )
-        addRenderableWidget(
-            Button.builder(Component.literal("延迟校准")) {
-                minecraft?.setScreen(
-                    CalibrationScreen(this) {
-                        TaikoCraft.LOGGER.info(
-                            "偏移已应用：目押 {} ms，音押 {} ms",
-                            TaikoCraftClient.visualOffsetMs,
-                            TaikoCraftClient.audioOffsetMs,
-                        )
-                    },
-                )
-            }.bounds(width - 130, height - 30, 120, 20).build(),
-        )
-        // ---- 延迟手动输入 ----
-        val boxY = height - 56
-        visualBox = EditBox(font, width - 250, boxY, 50, 18, Component.literal("目押")).apply {
-            setMaxLength(6)
-            setValue(TaikoCraftClient.visualOffsetMs.toInt().toString())
-            setResponder { txt -> txt.toDoubleOrNull()?.let { applyOffsets(visual = it) } }
-        }
-        audioBox = EditBox(font, width - 180, boxY, 50, 18, Component.literal("音押")).apply {
-            setMaxLength(6)
-            setValue(TaikoCraftClient.audioOffsetMs.toInt().toString())
-            setResponder { txt -> txt.toDoubleOrNull()?.let { applyOffsets(audio = it) } }
-        }
-        visualBox?.let { addRenderableWidget(it) }
-        audioBox?.let { addRenderableWidget(it) }
-
-        addRenderableWidget(
-            Button.builder(Component.literal("-5")) {
-                applyOffsets(visual = TaikoCraftClient.visualOffsetMs - 5)
-                visualBox?.setValue(TaikoCraftClient.visualOffsetMs.toInt().toString())
-            }.bounds(width - 250, boxY - 22, 40, 18).build(),
-        )
-        addRenderableWidget(
-            Button.builder(Component.literal("+5")) {
-                applyOffsets(visual = TaikoCraftClient.visualOffsetMs + 5)
-                visualBox?.setValue(TaikoCraftClient.visualOffsetMs.toInt().toString())
-            }.bounds(width - 205, boxY - 22, 40, 18).build(),
-        )
-        addRenderableWidget(
-            Button.builder(Component.literal("-5")) {
-                applyOffsets(audio = TaikoCraftClient.audioOffsetMs - 5)
-                audioBox?.setValue(TaikoCraftClient.audioOffsetMs.toInt().toString())
-            }.bounds(width - 180, boxY - 22, 40, 18).build(),
-        )
-        addRenderableWidget(
-            Button.builder(Component.literal("+5")) {
-                applyOffsets(audio = TaikoCraftClient.audioOffsetMs + 5)
-                audioBox?.setValue(TaikoCraftClient.audioOffsetMs.toInt().toString())
-            }.bounds(width - 135, boxY - 22, 40, 18).build(),
-        )
-
         addRenderableWidget(
             Button.builder(Component.literal("AUTO: 关")) { btn ->
                 if (!AutoPlayPermission.canUse()) {
@@ -127,18 +74,63 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
                 }
                 autoPlayEnabled = !autoPlayEnabled
                 btn.message = Component.literal(if (autoPlayEnabled) "AUTO: 开" else "AUTO: 关")
-            }.bounds(186, height - 56, 90, 20).build(),
+            }.bounds(248, row1, 80, btnH).build(),
         )
 
-        addRenderableWidget(
-            Button.builder(Component.literal("上一页")) { scrollOffset = (scrollOffset - pageSize).coerceAtLeast(0) }
-                .bounds(10, height - 80, 80, 20).build(),
+        // ---- 行2：延迟输入（标签画在 renderContent 里）----
+        visualBox = EditBox(font, width - 236, row2, 46, 18, Component.literal("目押")).apply {
+            setMaxLength(6)
+            setValue(TaikoCraftClient.visualOffsetMs.toInt().toString())
+            setResponder { txt -> txt.toDoubleOrNull()?.let { applyOffsets(visual = it) } }
+        }
+        audioBox = EditBox(font, width - 128, row2, 46, 18, Component.literal("音押")).apply {
+            setMaxLength(6)
+            setValue(TaikoCraftClient.audioOffsetMs.toInt().toString())
+            setResponder { txt -> txt.toDoubleOrNull()?.let { applyOffsets(audio = it) } }
+        }
+        visualBox?.let { addRenderableWidget(it) }
+        audioBox?.let { addRenderableWidget(it) }
+
+        addRenderableWidget(Button.builder(Component.literal("-5")) {
+            applyOffsets(visual = TaikoCraftClient.visualOffsetMs - 5)
+            visualBox?.setValue(TaikoCraftClient.visualOffsetMs.toInt().toString())
+        }.bounds(width - 188, row2, 34, 18).build())
+        addRenderableWidget(Button.builder(Component.literal("+5")) {
+            applyOffsets(visual = TaikoCraftClient.visualOffsetMs + 5)
+            visualBox?.setValue(TaikoCraftClient.visualOffsetMs.toInt().toString())
+        }.bounds(width - 152, row2, 34, 18).build())
+        addRenderableWidget(Button.builder(Component.literal("-5")) {
+            applyOffsets(audio = TaikoCraftClient.audioOffsetMs - 5)
+            audioBox?.setValue(TaikoCraftClient.audioOffsetMs.toInt().toString())
+        }.bounds(width - 80, row2, 34, 18).build())
+        addRenderableWidget(Button.builder(Component.literal("+5")) {
+            applyOffsets(audio = TaikoCraftClient.audioOffsetMs + 5)
+            audioBox?.setValue(TaikoCraftClient.audioOffsetMs.toInt().toString())
+        }.bounds(width - 44, row2, 34, 18).build())
+
+        // ---- 行3：功能入口，等宽排开 ----
+        val entries = listOf<Pair<String, () -> Unit>>(
+            "← 返回" to { minecraft?.setScreen(previous) },
+            "键位设置" to { minecraft?.setScreen(KeyBindingScreen(this)) },
+            "曲包编辑器" to { minecraft?.setScreen(OszEditorScreen(this)) },
+            "曲库管理" to { minecraft?.setScreen(SongLibraryScreen(this)) },
+            "延迟校准" to {
+                minecraft?.setScreen(CalibrationScreen(this) {
+                    TaikoCraft.LOGGER.info(
+                        "偏移已应用：目押 {} ms，音押 {} ms",
+                        TaikoCraftClient.visualOffsetMs, TaikoCraftClient.audioOffsetMs,
+                    )
+                })
+            },
         )
-        addRenderableWidget(
-            Button.builder(Component.literal("下一页")) {
-                if (scrollOffset + pageSize < songs.size) scrollOffset += pageSize
-            }.bounds(96, height - 80, 80, 20).build(),
-        )
+        val w3 = 110
+        val gap = 6
+        val totalW = entries.size * w3 + (entries.size - 1) * gap
+        var x3 = (width - totalW) / 2
+        for ((label, action) in entries) {
+            addRenderableWidget(Button.builder(Component.literal(label)) { action() }.bounds(x3, row3, w3, btnH).build())
+            x3 += w3 + gap
+        }
     }
 
     /** 只改传入的那个值，另一个保持不变 */
@@ -187,16 +179,11 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
             }
         }
 
-        // 延迟标签
-        if (songs.isNotEmpty() || true) {
-            guiGraphics.drawString(font, "目押", width - 250, height - 74, 0xFFAAAAAA.toInt())
-            guiGraphics.drawString(font, "音押", width - 180, height - 74, 0xFFAAAAAA.toInt())
-            guiGraphics.drawString(
-                font,
-                "ms（改完自动保存）",
-                width - 120, height - 51, 0xFF666666.toInt(),
-            )
-        }
+        // 延迟输入标签（与 init 里的行2 对齐）
+        val row2 = height - 72
+        guiGraphics.drawString(font, "目押", width - 272, row2 + 5, 0xFFAAAAAA.toInt())
+        guiGraphics.drawString(font, "音押", width - 164, row2 + 5, 0xFFAAAAAA.toInt())
+        guiGraphics.drawString(font, "ms", width - 4, row2 + 5, 0xFF666666.toInt())
 
         if (statusMessage.isNotBlank()) {
             guiGraphics.drawString(font, statusMessage, 10, height - 50, 0xFFFF7777.toInt())

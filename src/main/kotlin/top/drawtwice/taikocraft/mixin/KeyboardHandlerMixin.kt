@@ -5,6 +5,7 @@ import org.spongepowered.asm.mixin.Mixin
 import org.spongepowered.asm.mixin.injection.At
 import org.spongepowered.asm.mixin.injection.Inject
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo
+import top.drawtwice.taikocraft.client.TaikoScreen
 import top.drawtwice.taikocraft.client.input.KeyInputBuffer
 import top.drawtwice.taikocraft.client.input.TaikoKeyConfig
 import top.drawtwice.taikocraft.client.input.TimedHit
@@ -22,6 +23,8 @@ class KeyboardHandlerMixin {
     @Inject(method = ["keyPress"], at = [At("HEAD")])
     fun onKeyPress(window: Long, key: Int, scancode: Int, action: Int, modifiers: Int, ci: CallbackInfo) {
         if (action != 1) return
+        // ★ 只在太鼓游玩界面记录，避免在选曲/设置界面误收集
+        if (net.minecraft.client.Minecraft.getInstance().screen !is TaikoScreen) return
         val mapped = TaikoKeyConfig.mapping.toColorSide(key) ?: return
         KeyInputBuffer.push(TimedHit(mapped.first, mapped.second, System.nanoTime()))
     }

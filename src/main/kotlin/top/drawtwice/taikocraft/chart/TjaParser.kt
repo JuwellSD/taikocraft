@@ -285,7 +285,7 @@ object TjaParser {
                     if (measureDivs <= 1 && measureChars == 0) {
                         currentTimeMs += divMs * 16.0
                     }
-                    barLines += BarLine(toAudioTime(currentTimeMs))
+                    barLines += BarLine(toAudioTime(currentTimeMs), currentBpm)
                     divIdx++
                     measureDivs = (divsPerMeasure.getOrNull(divIdx) ?: 0).coerceAtLeast(1)
                     measureChars = 0

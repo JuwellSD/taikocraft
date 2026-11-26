@@ -21,15 +21,9 @@ class SongLibraryScreen(private val previous: Screen? = null) : TaikoScreenBase(
     private var selected = 0
     private var status = ""
 
-    /** 待确认的删除操作 */
-    private enum class Danger(val label: String, val steps: Int, val ms: Long) {
-        SONG("删除整首曲目", 2, 5_000L),
-        DIFFICULTY("删除该难度", 2, 5_000L),
-    }
-
-    private var pendingDanger: Danger? = null
-    private var pendingStep = 0
-    private var pendingSince = 0L
+    /** 弹窗式确认：一次点击即弹窗，弹窗里点「确认删除」才执行 */
+    private var confirmAction: (() -> Unit)? = null
+    private var confirmText: String = ""
     private var pendingDiffIndex = -1
 
     private data class RowHit(val index: Int, val y: Int)
@@ -39,19 +33,15 @@ class SongLibraryScreen(private val previous: Screen? = null) : TaikoScreenBase(
         reload()
         val cx = width / 2
         addRenderableWidget(
-            Button.builder(Component.literal("删除整首")) { onDanger(Danger.SONG) }
+            Button.builder(Component.literal("删除整首")) { askDeleteSong() }
                 .bounds(cx - 240, height - 30, 110, 20).build(),
         )
         addRenderableWidget(
-            Button.builder(Component.literal("删除选中难度")) { onDanger(Danger.DIFFICULTY) }
+            Button.builder(Component.literal("删除选中难度")) { askDeleteDifficulty() }
                 .bounds(cx - 120, height - 30, 110, 20).build(),
         )
         addRenderableWidget(
-            Button.builder(Component.literal("取消确认")) {
-                pendingDanger = null
-                pendingDiffIndex = -1
-                status = "已取消"
-            }.bounds(cx, height - 30, 90, 20).build(),
+
         )
         addRenderableWidget(
             Button.builder(Component.literal("← 返回")) { minecraft?.setScreen(previous) }
@@ -75,77 +65,88 @@ class SongLibraryScreen(private val previous: Screen? = null) : TaikoScreenBase(
 
     private fun currentSong(): SongLibrary.SongEntry? = songs.getOrNull(selected)
 
-    private fun onDanger(d: Danger) {
-        val song = currentSong()
-        if (song == null) {
-            status = "曲库为空"
-            return
-        }
-
-        // 第一次点击
-        if (pendingDanger != d) {
-            if (d == Danger.DIFFICULTY) {
-                status = "请先点选要删除的难度"
-                return
-            }
-            pendingDanger = d
-            pendingStep = 1
-            pendingSince = System.nanoTime()
-            status = "再次点击「${d.label}」确认（1/${d.steps}）"
-            return
-        }
-
-        // 违规：倒计时未结束
-        val elapsed = (System.nanoTime() - pendingSince) / 1_000_000
-        if (elapsed < d.ms) {
-            val left = ((d.ms - elapsed) / 1000.0).let { "%.1f".format(it) }
-            status = "倒计时未结束（${left}s）"
-            return
-        }
-
-        if (pendingStep < d.steps) {
-            pendingStep++
-            pendingSince = System.nanoTime()
-            status = "已确认 ${pendingStep - 1}/${d.steps}，请继续"
-            return
-        }
-
-        // 最终执行
-        pendingDanger = null
-        pendingStep = 0
-        execute(d, song)
+    /** 弹出确认框 */
+    private fun askConfirm(text: String, action: () -> Unit) {
+        confirmText = text
+        confirmAction = action
     }
 
-    private fun execute(d: Danger, song: SongLibrary.SongEntry) {
-        runCatching {
-            when (d) {
-                Danger.SONG -> {
-                    val moved = SongLibraryManager.deleteSong(SongLibrary.defaultRoot(), song.directory)
-                    status = "已移入回收站：${moved.fileName}"
-                }
-                Danger.DIFFICULTY -> {
-                    val diff = song.difficulties.getOrNull(pendingDiffIndex)
-                        ?: run { status = "未选中难度"; return }
-                    when (diff.source.extension.lowercase()) {
-                        "tja" -> {
-                            val rest = SongLibraryManager.removeTjaCourse(diff.source, diff.name)
-                            status = "已删除难度「${diff.name}」，剩余：${rest.joinToString("/")}"
-                        }
-                        "osu" -> {
-                            SongLibraryManager.deleteOsuFile(diff.source)
-                            status = "已删除难度「${diff.name}」"
-                        }
-                        else -> status = "不支持的谱面格式"
+    private fun askDeleteSong() {
+        val song = currentSong() ?: run { status = "曲库为空"; return }
+        askConfirm("确定删除整首「${song.displayTitle}」？\n（移入 .trash，可手动恢复）") {
+            runCatching {
+                val moved = SongLibraryManager.deleteSong(SongLibrary.defaultRoot(), song.directory)
+                status = "已移入回收站：${moved.fileName}"
+            }.onFailure {
+                status = "失败：${it.message}"
+                TaikoCraft.LOGGER.error("删除曲目失败", it)
+            }
+            reload()
+        }
+    }
+
+    private fun askDeleteDifficulty() {
+        val song = currentSong() ?: run { status = "曲库为空"; return }
+        val diff = song.difficulties.getOrNull(pendingDiffIndex)
+            ?: run { status = "请先点选要删除的难度"; return }
+        askConfirm("确定删除难度「${diff.name}」？\n（从谱面文件中移除该 COURSE）") {
+            runCatching {
+                when (diff.source.extension.lowercase()) {
+                    "tja" -> {
+                        val rest = SongLibraryManager.removeTjaCourse(diff.source, diff.name)
+                        status = "已删除「${diff.name}」，剩余：${rest.joinToString("/")}"
                     }
+                    "osu" -> {
+                        SongLibraryManager.deleteOsuFile(diff.source)
+                        status = "已删除「${diff.name}」"
+                    }
+                    else -> status = "不支持的格式"
                 }
+            }.onFailure {
+                status = "失败：${it.message}"
+                TaikoCraft.LOGGER.error("删除难度失败", it)
             }
-        }.onFailure {
-            status = "操作失败：${it.message}"
-            TaikoCraft.LOGGER.error("曲库操作失败", it)
+            pendingDiffIndex = -1
+            reload()
         }
-        pendingDiffIndex = -1
-        reload()
     }
+
+    /** 弹窗（画在最上层） */
+    private fun renderConfirmDialog(g: GuiGraphics, mouseX: Int, mouseY: Int) {
+        val action = confirmAction ?: return
+        // 遮罩
+        g.fill(0, 0, width, height, 0xC0000000.toInt())
+        val boxW = 340
+        val boxH = 110
+        val x1 = (width - boxW) / 2
+        val y1 = (height - boxH) / 2
+        val x2 = x1 + boxW
+        val y2 = y1 + boxH
+        g.fill(x1, y1, x2, y2, 0xFF2A2A33.toInt())
+        g.fill(x1, y1, x2, y1 + 2, 0xFFFF5555.toInt())
+        g.fill(x1, y2 - 2, x2, y2, 0xFFFF5555.toInt())
+        g.fill(x1, y1, x1 + 2, y2, 0xFFFF5555.toInt())
+        g.fill(x2 - 2, y1, x2, y2, 0xFFFF5555.toInt())
+
+        // 文本（多行）
+        var ty = y1 + 14
+        for (line in confirmText.split("\n")) {
+            g.drawCenteredString(font, line, width / 2, ty, 0xFFFFFFFF.toInt())
+            ty += 14
+        }
+
+        // 按钮命中区（记录，mouseClicked 用）
+        dialogYes = intArrayOf(width / 2 - 110, y2 - 34, width / 2 - 10, y2 - 10)
+        dialogNo = intArrayOf(width / 2 + 10, y2 - 34, width / 2 + 110, y2 - 10)
+        g.fill(dialogYes[0], dialogYes[1], dialogYes[2], dialogYes[3], 0xFF8B2020.toInt())
+        g.drawCenteredString(font, "确认删除", (dialogYes[0] + dialogYes[2]) / 2, dialogYes[1] + 6, 0xFFFFFFFF.toInt())
+        g.fill(dialogNo[0], dialogNo[1], dialogNo[2], dialogNo[3], 0xFF3A3A45.toInt())
+        g.drawCenteredString(font, "取消", (dialogNo[0] + dialogNo[2]) / 2, dialogNo[1] + 6, 0xFFDDDDDD.toInt())
+        @Suppress("UNUSED_EXPRESSION") action
+    }
+
+    private var dialogYes: IntArray = IntArray(4)
+    private var dialogNo: IntArray = IntArray(4)
 
     override fun renderContent(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
         guiGraphics.drawCenteredString(font, "曲库管理", width / 2, 16, 0xFFFFFFFF.toInt())
@@ -196,6 +197,8 @@ class SongLibraryScreen(private val previous: Screen? = null) : TaikoScreenBase(
         if (status.isNotBlank()) {
             guiGraphics.drawString(font, status, 12, height - 52, 0xFF7FE87F.toInt())
         }
+
+        renderConfirmDialog(guiGraphics, mouseX, mouseY)
     }
 
     private data class DifficultyHitbox(val index: Int, val x1: Int, val y1: Int, val x2: Int, val y2: Int) {
@@ -206,6 +209,23 @@ class SongLibraryScreen(private val previous: Screen? = null) : TaikoScreenBase(
 
     override fun mouseClicked(mouseX: Double, mouseY: Double, button: Int): Boolean {
         if (button != 0) return super.mouseClicked(mouseX, mouseY, button)
+
+        // 弹窗优先
+        if (confirmAction != null) {
+            val mx = mouseX.toInt(); val my = mouseY.toInt()
+            if (mx in dialogYes[0]..dialogYes[2] && my in dialogYes[1]..dialogYes[3]) {
+                val act = confirmAction
+                confirmAction = null
+                act?.invoke()
+                return true
+            }
+            if (mx in dialogNo[0]..dialogNo[2] && my in dialogNo[1]..dialogNo[3]) {
+                confirmAction = null
+                status = "已取消"
+                return true
+            }
+            return true // 弹窗期间吞掉其它点击
+        }
 
         // 点难度
         difficultyHitboxes.firstOrNull { it.contains(mouseX.toInt(), mouseY.toInt()) }?.let { hit ->
@@ -218,7 +238,6 @@ class SongLibraryScreen(private val previous: Screen? = null) : TaikoScreenBase(
         rowHits.firstOrNull { mouseY.toInt() in it.y..(it.y + 12) }?.let { hit ->
             selected = hit.index
             pendingDiffIndex = -1
-            pendingDanger = null
             return true
         }
         return super.mouseClicked(mouseX, mouseY, button)

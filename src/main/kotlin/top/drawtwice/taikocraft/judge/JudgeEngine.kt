@@ -55,9 +55,10 @@ class JudgeEngine(
 
     /** 处理一次击打；返回本次触发的判定（可能为空——例如落在空处且未惩罚） */
     fun press(event: InputEvent): JudgeResult? {
-        // 同一只手的高频连打保护：40ms 内同侧不再判定
+        // 同一只手的高频连打保护：20ms 内同侧不再判定。
+        // 原来 40ms 太大会吞掉高速连打（16分音符 @300BPM 间隔仅 50ms）
         val last = lastPressAt[event.side]
-        if (last != null && event.timeMs - last < 40.0) return null
+        if (last != null && event.timeMs - last < 20.0) return null
         lastPressAt[event.side] = event.timeMs
 
         // 大音符补第二手
