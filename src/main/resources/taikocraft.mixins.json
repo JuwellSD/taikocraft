@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "package": "top.drawtwice.taikocraft.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "minVersion": "0.8",
+  "client": [
+    "KeyboardHandlerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
