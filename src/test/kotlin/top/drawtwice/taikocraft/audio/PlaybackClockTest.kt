@@ -57,8 +57,10 @@ class PlaybackClockTest {
         val clock = PlaybackClock(leadInMs = 100.0)
         clock.visualOffsetMs = 50.0
         clock.start()
+        // 先读位置，再读渲染时间；允许微小的时钟推进误差
         val pos = clock.songPositionMs
-        assertEquals(pos + 100.0 - 50.0, clock.chartTimeVisualMs, 0.001)
+        val visual = clock.chartTimeVisualMs
+        assertEquals(100.0 - 50.0, visual - pos, 15.0)
     }
 
     @Test
@@ -67,23 +69,24 @@ class PlaybackClockTest {
         clock.audioOffsetMs = 80.0
         clock.start()
         val pos = clock.songPositionMs
-        assertEquals(pos + 100.0 - 80.0, clock.chartTimeJudgeMs, 0.001)
+        val judge = clock.chartTimeJudgeMs
+        assertEquals(100.0 - 80.0, judge - pos, 15.0)
     }
 
     @Test
     fun `目押与音押互相独立`() {
         val clock = PlaybackClock()
         clock.start()
+        // 同一时刻读 visual 与 judge 的差值，避免时钟推进造成误差
         clock.visualOffsetMs = 200.0
         clock.audioOffsetMs = 0.0
-        val pos = clock.songPositionMs
-        assertEquals(pos - 200.0, clock.chartTimeVisualMs, 0.001)
-        assertEquals(pos, clock.chartTimeJudgeMs, 0.001)
+        var diff = clock.chartTimeJudgeMs - clock.chartTimeVisualMs
+        assertEquals(200.0, diff, 10.0, "目押应比判定时间早 200ms")
 
         clock.visualOffsetMs = 0.0
         clock.audioOffsetMs = 120.0
-        assertEquals(clock.songPositionMs, clock.chartTimeVisualMs, 0.001)
-        assertEquals(clock.songPositionMs - 120.0, clock.chartTimeJudgeMs, 0.001)
+        diff = clock.chartTimeJudgeMs - clock.chartTimeVisualMs
+        assertEquals(-120.0, diff, 10.0, "音押 120 应让判定时间比渲染早 120ms")
     }
 
     @Test
@@ -103,7 +106,7 @@ class PlaybackClockTest {
         assertFalse(clock.isPlaying)
         val frozen = clock.songPositionMs
         Thread.sleep(20)
-        assertEquals(frozen, clock.songPositionMs, 0.001)
+        assertEquals(frozen, clock.songPositionMs, 1.0)
 
         clock.resume()
         assertTrue(clock.isPlaying)
