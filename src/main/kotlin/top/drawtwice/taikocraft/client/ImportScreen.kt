@@ -24,7 +24,7 @@ import kotlin.io.path.nameWithoutExtension
  * - `.tja` + 音频        → 需要同一目录下有 `.ogg` / `.mp3` / `.wav`
  * - `.zip`              → 内含 tja+音频，或内含 osz
  */
-internal data class Importable(val file: Path, val companionAudio: Path?)
+data class Importable(val file: Path, val companionAudio: Path?)
 
 class ImportScreen(private val previous: Screen? = null) : Screen(Component.literal("导入曲目")) {
 
