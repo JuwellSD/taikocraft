@@ -174,7 +174,7 @@ class OpenAlPlayback private constructor(
             val direct = MemoryUtil.memAlloc(bytes.size).put(bytes).flip() as ByteBuffer
             MemoryStack.stackPush().use { stack ->
                 val error = stack.mallocInt(1)
-                val decoder = STBVorbis.stb_vorbis_open_memory(direct, error, null)
+                val decoder = STBVorbis.stb_vorbis_open_memory(direct, error, null, null)
                 if (decoder == 0L) {
                     MemoryUtil.memFree(direct)
                     throw IllegalStateException("OGG 解码失败（错误码 ${error.get(0)}）")
