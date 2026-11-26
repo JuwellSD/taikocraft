@@ -36,85 +36,85 @@ class TjaParserTest {
     }
 
     @Test
-    fun `小节时长按 BPM 计算 - 120bpm 一拍 500ms 四拍 2000ms`() {
-        // 逐字符模型："1," = 2 字符，每字符 2000/2 = 1000ms
-        // 1@0，逗号推进完整小节 2000ms
-        val file = TjaParser.parse(tja(body = "1,"))
-        val chart = file.charts[0]
-        assertEquals(2000.0, chart.barLines.first().timeMs, 0.001)
+    fun `小节时长按 BPM 计算 - 120bpm 四拍 2000ms`() {
+        // 120 BPM 4/4：整小节 240000/120 = 2000ms
+        // "1," = 1 个音符字符 + 结束逗号 → 小节结束于 2000ms
+        val chart = TjaParser.parse(tja(body = "1,")).charts[0]
+        assertEquals(1, chart.barLines.size)
+        assertEquals(2000.0, chart.barLines[0].timeMs, 0.001)
         assertEquals(0.0, chart.notes[0].timeMs, 0.001)
     }
 
     @Test
-    fun `空小节推进时间轴 - 每个逗号推进一小节`() {
-        // 逐字符模型：逗号 = 小节结束，推进一整小节（16 div）
-        val file = TjaParser.parse(tja(body = ",,"))
-        val chart = file.charts[0]
-        assertEquals(2, chart.barLines.size)
-        assertEquals(4000.0, chart.barLines.last().timeMs, 0.001)
-        assertTrue(chart.notes.isEmpty())
-
-        // "1,1"：第 1 个字在 0ms；逗号后第 3 个字符（索引 2）在 1/3 行 + 1 小节
-        // 行共 3 字符 → 每字符 = 2000/3 ms；位置 = 2000（逗号推进）+ 2000/3
-        val two = TjaParser.parse(tja(body = "1,1")).charts[0]
-        assertEquals(2, two.notes.size)
-        assertEquals(0.0, two.notes[0].timeMs, 0.001)
-        assertEquals(2000.0 + 2000.0 / 3.0, two.notes[1].timeMs, 0.5)
-    }
-
-    @Test
-    fun `音符在大节内的位置插值`() {
-        // "1111" → 4 个字符，每字符 500ms
-        val file = TjaParser.parse(tja(body = "1111"))
-        val times = file.charts[0].notes.map { it.timeMs }
+    fun `音符在小节内的位置 - 4 字符平分 2000ms`() {
+        val times = TjaParser.parse(tja(body = "1111")).charts[0].notes.map { it.timeMs }
         assertEquals(listOf(0.0, 500.0, 1000.0, 1500.0), times)
     }
 
     @Test
-    fun `OFFSET 为正时谱面提前 音符时刻变小`() {
-        // OFFSET:1 秒 → 音频位置 = T - 1000
-        val file = TjaParser.parse(tja(offset = "1", body = "1111"))
-        val times = file.charts[0].notes.map { it.timeMs }
+    fun `字符数决定分格 - 8 字符平分 2000ms`() {
+        // "11111111," 有 8 个音符字符 @ 2000ms 小节 → 每格 250ms
+        val chart = TjaParser.parse(tja(body = "11111111,")).charts[0]
+        val times = chart.notes.map { it.timeMs }
+        assertEquals(8, times.size)
+        assertEquals(listOf(0.0, 250.0, 500.0, 750.0, 1000.0, 1250.0, 1500.0, 1750.0), times)
+        assertEquals(2000.0, chart.barLines[0].timeMs, 0.001)
+    }
+
+    @Test
+    fun `跨行累加 div 数`() {
+        // 两行各 4 字符、都不含逗号 → 合成一个小节 8 div
+        val chart = TjaParser.parse(tja(body = "1111" + "\n" + "1111,")).charts[0]
+        val times = chart.notes.map { it.timeMs }
+        assertEquals(8, times.size)
+        assertEquals(listOf(0.0, 250.0, 500.0, 750.0, 1000.0, 1250.0, 1500.0, 1750.0), times)
+        assertEquals(2000.0, chart.barLines[0].timeMs, 0.001)
+    }
+
+    @Test
+    fun `空小节推进一整小节`() {
+        val chart = TjaParser.parse(tja(body = ",,")).charts[0]
+        assertEquals(2, chart.barLines.size)
+        assertEquals(2000.0, chart.barLines[0].timeMs, 0.001)
+        assertEquals(4000.0, chart.barLines[1].timeMs, 0.001)
+        assertTrue(chart.notes.isEmpty())
+    }
+
+    @Test
+    fun `OFFSET 为正时谱面提前`() {
+        val times = TjaParser.parse(tja(offset = "1", body = "1111")).charts[0].notes.map { it.timeMs }
         assertEquals(listOf(-1000.0, -500.0, 0.0, 500.0), times)
     }
 
     @Test
     fun `BPMCHANGE 后小节时长变化`() {
-        val body = "1" + "\n" + "#BPMCHANGE 240" + "\n" + "1"
-        val file = TjaParser.parse(tja(body = body))
-        val chart = file.charts[0]
-        // 第一行 "1"（1 字符 @120）：音符@0，行末 2000
-        // 第二行 "1"（1 字符 @240）：音符@2000
-        assertEquals(2, chart.notes.size)
-        assertEquals(0.0, chart.notes[0].timeMs, 0.001)
-        assertEquals(2000.0, chart.notes[1].timeMs, 0.001)
+        val body = "1," + "\n" + "#BPMCHANGE 240" + "\n" + "1,"
+        val chart = TjaParser.parse(tja(body = body)).charts[0]
+        // 第一小节 @120 = 2000ms；第二小节 @240 = 1000ms
+        assertEquals(2, chart.barLines.size)
+        assertEquals(2000.0, chart.barLines[0].timeMs, 0.001)
+        assertEquals(3000.0, chart.barLines[1].timeMs, 0.001)
     }
 
     @Test
     fun `MEASURE 改变小节长度 - 3 4 拍`() {
-        val body = "#MEASURE 3/4" + "\n" + "1,"
-        val file = TjaParser.parse(tja(body = body))
-        // 120bpm + 3/4：divMs = 15000/120*(3/4) = 93.75ms
-        // 行 "1," 字符数 2，每字符 93.75*16/2 = 750ms；逗号推进一整小节 1500ms
-        assertEquals(1, file.charts[0].barLines.size)
-        assertEquals(1500.0, file.charts[0].barLines.first().timeMs, 0.001)
+        val chart = TjaParser.parse(tja(body = "#MEASURE 3/4" + "\n" + "1,")).charts[0]
+        // 120 BPM + 3/4：240000/120 × 3/4 = 1500ms
+        assertEquals(1, chart.barLines.size)
+        assertEquals(1500.0, chart.barLines[0].timeMs, 0.001)
     }
 
     @Test
     fun `DELAY 使后续整体后移`() {
-        val body = """
-            1
-            #DELAY 1
-            1
-        """.trimIndent()
-        val file = TjaParser.parse(tja(body = body))
-        val notes = file.charts[0].notes
+        val body = "1," + "\n" + "#DELAY 1" + "\n" + "1,"
+        val chart = TjaParser.parse(tja(body = body)).charts[0]
+        val notes = chart.notes
         assertEquals(0.0, notes[0].timeMs, 0.001)
-        assertEquals(3000.0, notes[1].timeMs, 0.001) // 2000 + 1000
+        assertEquals(3000.0, notes[1].timeMs, 0.001) // 2000 + 1000 delay
     }
 
     @Test
-    fun `多难度分块 - 每个 COURSE 一个谱面`() {
+    fun `多难度分块`() {
         val text = """
             TITLE:多难度
             BPM:120
@@ -124,13 +124,13 @@ class TjaParserTest {
             COURSE:Easy
             LEVEL:3
             #START
-            1
+            1,
             #END
 
             COURSE:Oni
             LEVEL:10
             #START
-            1111
+            1111,
             #END
         """.trimIndent()
         val file = TjaParser.parse(text)
@@ -146,9 +146,8 @@ class TjaParserTest {
     }
 
     @Test
-    fun `大音符与颜色的映射`() {
-        val file = TjaParser.parse(tja(body = "1234"))
-        val notes = file.charts[0].notes
+    fun `大音符与颜色映射`() {
+        val notes = TjaParser.parse(tja(body = "1234")).charts[0].notes
         assertEquals(NoteColor.DON, notes[0].color)
         assertEquals(false, notes[0].big)
         assertEquals(NoteColor.KA, notes[1].color)
@@ -158,29 +157,26 @@ class TjaParserTest {
     }
 
     @Test
-    fun `连打起止 - 5 起 8 止`() {
-        val file = TjaParser.parse(tja(body = "1,5,8,2"))
-        val chart = file.charts[0]
+    fun `连打起止 5 到 8`() {
+        // "1,5,8,2," → 每小节 1 个字符（各占 2000ms）
+        val chart = TjaParser.parse(tja(body = "1,5,8,2,")).charts[0]
         assertEquals(1, chart.rolls.size)
-        val roll = chart.rolls[0]
-        assertEquals(2000.0, roll.startMs, 0.001)
-        assertEquals(4000.0, roll.endMs, 0.001)
-        assertEquals(false, roll.big)
+        assertEquals(2000.0, chart.rolls[0].startMs, 0.001)
+        assertEquals(4000.0, chart.rolls[0].endMs, 0.001)
+        assertEquals(false, chart.rolls[0].big)
         assertEquals(2, chart.notes.size)
     }
 
     @Test
-    fun `大连打 - 6 起 8 止`() {
-        val file = TjaParser.parse(tja(body = "6,8"))
-        val chart = file.charts[0]
+    fun `大连打 6 到 8`() {
+        val chart = TjaParser.parse(tja(body = "6,8,")).charts[0]
         assertEquals(1, chart.rolls.size)
         assertEquals(true, chart.rolls[0].big)
     }
 
     @Test
-    fun `气球 - 7 起 8 止 按 BALLOON 字段取数量`() {
-        val file = TjaParser.parse(tja(body = "7,8", balloon = "12"))
-        val chart = file.charts[0]
+    fun `气球按 BALLOON 字段取数量`() {
+        val chart = TjaParser.parse(tja(body = "7,8,", balloon = "12")).charts[0]
         assertEquals(1, chart.balloons.size)
         assertEquals(12, chart.balloons[0].requiredHits)
         assertEquals(0.0, chart.balloons[0].startMs, 0.001)
@@ -188,45 +184,42 @@ class TjaParserTest {
     }
 
     @Test
-    fun `多个气球按 BALLOON 顺序取数量`() {
-        val file = TjaParser.parse(tja(body = "7,8,7,8", balloon = "5,8"))
-        val balloons = file.charts[0].balloons
-        assertEquals(2, balloons.size)
-        assertEquals(5, balloons[0].requiredHits)
-        assertEquals(8, balloons[1].requiredHits)
+    fun `多个气球按顺序取数量`() {
+        val chart = TjaParser.parse(tja(body = "7,8,7,8,", balloon = "5,8")).charts[0]
+        assertEquals(2, chart.balloons.size)
+        assertEquals(5, chart.balloons[0].requiredHits)
+        assertEquals(8, chart.balloons[1].requiredHits)
     }
 
     @Test
     fun `分支只取普通 N 段`() {
         val body = """
-            1
+            1,
             #BRANCHSTART p,1,2
             #N
-            2
+            2,
             #E
-            3
+            3,
             #M
-            4
+            4,
             #BRANCHEND
-            1
+            1,
         """.trimIndent()
-        val file = TjaParser.parse(tja(body = body))
-        val notes = file.charts[0].notes
-        // 只应有 '1'、'2'、'1' 三个音符，不含大音符 3/4
+        val notes = TjaParser.parse(tja(body = body)).charts[0].notes
         assertEquals(3, notes.size)
         assertTrue(notes.none { it.big })
         assertEquals(NoteColor.KA, notes[1].color)
     }
 
     @Test
-    fun `省略 START END 的 TJA 也能解析`() {
+    fun `省略 START END 也能解析`() {
         val text = """
             TITLE:无标记
             BPM:120
             OFFSET:0
             COURSE:Oni
             LEVEL:5
-            1111
+            1111,
         """.trimIndent()
         val file = TjaParser.parse(text)
         assertEquals(1, file.charts.size)
@@ -235,44 +228,60 @@ class TjaParserTest {
 
     @Test
     fun `久寿玉 9 按气球处理`() {
-        val file = TjaParser.parse(tja(body = "9,8", balloon = "7"))
-        val chart = file.charts[0]
+        val chart = TjaParser.parse(tja(body = "9,8,", balloon = "7")).charts[0]
         assertEquals(1, chart.balloons.size)
         assertEquals(7, chart.balloons[0].requiredHits)
     }
 
     @Test
-    fun `内联 BPMCHANGE 从命令位置起生效`() {
-        // "11#BPMCHANGE 240,11"：先应用内联命令（BPM=240），数据部分 "11"（2 字符）
-        // divMs = 15000/240 = 62.5；每字符 = 62.5*16/2 = 500ms
-        // 1@0, 1@500, 逗号推进 1000ms → 1500, 之后同 BPM：1@1500, 1@2000
-        val file = TjaParser.parse(tja(body = "11#BPMCHANGE 240,11"))
-        val times = file.charts[0].notes.map { it.timeMs }
-        assertEquals(4, times.size)
-        assertEquals(0.0, times[0], 0.001)
-        assertEquals(500.0, times[1], 0.001)
-        assertEquals(1500.0, times[2], 0.001)
-        assertEquals(2000.0, times[3], 0.001)
+    fun `行尾注释被剥离`() {
+        // "1111,//55" → 数据 "1111,"，与不含注释完全一致
+        val withC = TjaParser.parse(tja(body = "1111,//55" + "\n" + "1111,")).charts[0]
+        val withoutC = TjaParser.parse(tja(body = "1111," + "\n" + "1111,")).charts[0]
+        assertEquals(withoutC.notes.map { it.timeMs }, withC.notes.map { it.timeMs })
+        assertEquals(withoutC.barLines.map { it.timeMs }, withC.barLines.map { it.timeMs })
     }
 
     @Test
-    fun `行尾注释被正确剥离`() {
-        // 关键：注释被删掉后，本行字符数不变 → 时间轴应与无注释版本一致
-        // "1111,//55" 剥离后数据部分是 "1111,"（5 字符）
-        // "1111," 本身就是 5 字符
-        val withComment = TjaParser.parse(tja(body = "1111,//55" + "\n" + "1111"))
-        val withoutComment = TjaParser.parse(tja(body = "1111," + "\n" + "1111"))
-        val a = withComment.charts[0].notes.map { it.timeMs }
-        val b = withoutComment.charts[0].notes.map { it.timeMs }
-        assertEquals(b, a, "行尾注释不应影响时间轴")
-        assertEquals(8, a.size)
-    }
-
-    @Test
-    fun `编码回退 - Shift_JIS 日文标题`() {
-        val text = "TITLE:テスト\nBPM:120\nOFFSET:0\nCOURSE:Oni\nLEVEL:1\n1\n"
-        val bytes = text.toByteArray(charset("MS932"))
-        val file = TjaParser.parse(bytes)
+    fun `编码回退 - Shift_JIS`() {
+        val text = "TITLE:テスト\nBPM:120\nOFFSET:0\nCOURSE:Oni\nLEVEL:1\n1,\n"
+        val file = TjaParser.parse(text.toByteArray(charset("MS932")))
         assertEquals("テスト", file.title)
+    }
+}
+
+    @Test
+    fun `真实谱面回归 - Yuugen no Ran Hard 前 12 小节`() {
+        // 夹具来自真实 TJA（160 BPM, OFFSET -1.816, 12 字符/小节）
+        val text = javaClass.getResourceAsStream("/tja/yuugen_hard_head.tja")!!
+            .readBytes()
+        val file = TjaParser.parse(text)
+        val chart = file.charts[0]
+
+        assertEquals("Yuugen no Ran", file.title)
+        assertEquals(-1816.0, chart.offsetMs, 0.001)
+        assertEquals(160.0, chart.bpm, 0.001)
+
+        // 期望值由 OpenTaiko 的 divsPerMeasure 模型独立算出
+        // 每小节 12 div，160 BPM → 每小节 1500ms；OFFSET -1.816 → 整体 +1816ms
+        assertEquals(89, chart.notes.size)
+
+        val first16 = chart.notes.take(16).map { it.timeMs }
+        val expected = listOf(
+            1816.0, 1941.0, 2066.0, 2191.0,
+            2566.0, 2691.0, 2816.0, 2941.0,
+            3316.0, 3441.0, 3566.0, 3691.0,
+            4066.0, 4441.0, 4816.0, 4941.0,
+        )
+        assertEquals(expected, first16, "音符时间轴必须与 OpenTaiko 一致")
+
+        val bars = chart.barLines.take(12).map { it.timeMs }
+        assertEquals(
+            listOf(
+                3316.0, 4816.0, 6316.0, 7816.0, 9316.0, 10816.0,
+                12316.0, 13816.0, 15316.0, 16816.0, 18316.0, 19116.0,
+            ),
+            bars,
+        )
     }
 }

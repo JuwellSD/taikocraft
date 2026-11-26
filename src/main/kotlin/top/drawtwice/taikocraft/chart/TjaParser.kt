@@ -198,8 +198,34 @@ object TjaParser {
         var branchDepth = 0
         var activeBranch = 'N'
 
+        // ---------------------------------------------------------------
+        // 预处理：统计每小节的 div 数（OpenTaiko CTja.cs:1670-1700）
+        //   不含逗号的行 → divPerMeasure += 本行字母数字字符数（跨行累加）
+        //   含逗号的行   → divsPerMeasure.Add(acc + 本行字母数字数); 归零
+        // ---------------------------------------------------------------
+        val divsPerMeasure = mutableListOf<Int>()
+        run {
+            var acc = 0
+            for (rawLine in body.lines()) {
+                val line = rawLine.trim()
+                if (line.isEmpty() || line.startsWith("//") || line.startsWith("#")) continue
+                val data = line.substringBefore("//").substringBefore('#')
+                val cnt = data.count { it.isLetterOrDigit() }
+                if (',' !in data) acc += cnt else { divsPerMeasure += acc + cnt; acc = 0 }
+            }
+            divsPerMeasure += acc
+        }
+
+        var divIdx = 0
+        var measureDivs = (divsPerMeasure.getOrNull(0) ?: 0).coerceAtLeast(1)
+        /** 本小节已处理的音符字符数（用于空小节判定） */
+        var measureChars = 0
+
         fun toAudioTime(pos: Double): Double = pos + delayMs - offsetMs
 
+        // ---------------------------------------------------------------
+        // 单遍处理：命令与数据行按顺序处理，保证 BPM 变化的相对位置正确
+        // ---------------------------------------------------------------
         for (rawLine in body.lines()) {
             val line = rawLine.trim()
             if (line.isEmpty() || line.startsWith("//")) continue
@@ -212,11 +238,11 @@ object TjaParser {
                     upper.startsWith("#MEASURE") -> {
                         val parts = line.substringAfter("#MEASURE", "").trim().split('/')
                         if (parts.size == 2) {
-                            val s = parts[0].toDoubleOrNull()
-                            val m = parts[1].toDoubleOrNull()
-                            if (s != null && m != null && m != 0.0 && s > 0) {
-                                measureS = s
-                                measureM = m
+                            val sv = parts[0].toDoubleOrNull()
+                            val mv = parts[1].toDoubleOrNull()
+                            if (sv != null && mv != null && mv != 0.0 && sv > 0) {
+                                measureS = sv
+                                measureM = mv
                             }
                         }
                     }
@@ -225,52 +251,41 @@ object TjaParser {
                     upper.startsWith("#BRANCHSTART") -> { branchDepth++; activeBranch = 'N' }
                     upper == "#N" || upper == "#E" || upper == "#M" -> activeBranch = upper[1]
                     upper.startsWith("#BRANCHEND") -> { branchDepth--; activeBranch = 'N' }
-                    else -> Unit // #SCROLL/#GOGO/#BARLINE 等：Phase 1 忽略
+                    else -> Unit
                 }
                 continue
             }
 
             if (branchDepth > 0 && activeBranch != 'N') continue
 
-            // ==================================================================
-            // 逐字符推进时间轴（对齐 OpenTaiko 的 GotoNextDiv）
-            //
-            // OpenTaiko：每处理一个字符后
-            //   GotoNextDiv(nTextCount) → now += 15000/BPM × (s/m) × (16 / nTextCount)
-            // 遇到逗号时
-            //   GotoNextDiv(1)          → now += 15000/BPM × (s/m) × 16
-            //
-            // 关键：nTextCount 是**本行字符总数**（含逗号），不是小节数。
-            // 早期版本用 `split(',')` 后按小节索引插值，导致时间轴平均偏差 372ms、
-            // 最大 760ms 且随歌曲累积 —— 这就是「谱面严重不对」的根因。
-            // ==================================================================
-            val lineNoComment = line.substringBefore("//") // 行尾注释也要去掉
-            if (lineNoComment.isEmpty()) continue
-
-            // 内联命令：`#BPMCHANGE 150` 出现在一行中间时，从该点起生效，后面内容不参与本行
-            val inlineIdx = lineNoComment.indexOf('#')
+            // 内联命令（行中出现 #）：从该点起生效，后面不参与本行
+            val inlineIdx = line.indexOf('#')
             val dataPart = if (inlineIdx >= 0) {
-                applyInlineCommand(lineNoComment.substring(inlineIdx),
+                applyInlineCommand(
+                    line.substring(inlineIdx),
                     onBpm = { currentBpm = it },
-                    onMeasure = { s, m -> measureS = s; measureM = m })
-                lineNoComment.substring(0, inlineIdx)
-            } else lineNoComment
+                    onMeasure = { s2, m2 -> measureS = s2; measureM = m2 },
+                )
+                line.substring(0, inlineIdx)
+            } else line
 
-            val nTextCount = dataPart.length
-            if (nTextCount == 0) continue
-
-            // 1 个 16 分格 = 15000/BPM × (s/m) ms；1 小节 = 16 格
-            val divMs = 15000.0 / currentBpm * (measureS / measureM)  // 16 分音符时长
-            val measureMs = divMs * 16.0                              // 整小节时长
+            val divMs = 15000.0 / currentBpm * (measureS / measureM)
 
             for (ch in dataPart) {
                 if (ch == ',') {
-                    currentTimeMs += measureMs
+                    // 逗号只标记小节结束，**不推进时间**——
+                    // 小节时长已由前面各字符的推进累计完成（对齐 OpenTaiko：逗号处 return）。
+                    // 例外：空小节（本小节 0 个音符字符）需要补推一整小节。
+                    if (measureDivs <= 1 && measureChars == 0) {
+                        currentTimeMs += divMs * 16.0
+                    }
                     barLines += BarLine(toAudioTime(currentTimeMs))
+                    divIdx++
+                    measureDivs = (divsPerMeasure.getOrNull(divIdx) ?: 0).coerceAtLeast(1)
+                    measureChars = 0
                     continue
                 }
-                if (ch == '#') break
-                if (ch.isWhitespace()) continue
+                if (!ch.isLetterOrDigit()) continue
 
                 val time = toAudioTime(currentTimeMs)
                 when (ch) {
@@ -294,10 +309,9 @@ object TjaParser {
                             openBalloonStart = Double.NaN
                         }
                     }
-                    // '0' 空 / 'F' ADLIB / 'C' 地雷 / 'D' 导火索 / 'G' 紫：暂不生成音符
                 }
-                // ★ 每处理一个字符推进一格（分母 = 本行字符总数）
-                currentTimeMs += divMs * (16.0 / nTextCount)
+                currentTimeMs += divMs * 16.0 / measureDivs
+                measureChars++
             }
         }
 
