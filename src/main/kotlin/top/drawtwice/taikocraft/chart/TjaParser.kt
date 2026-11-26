@@ -258,16 +258,20 @@ object TjaParser {
 
             if (branchDepth > 0 && activeBranch != 'N') continue
 
+            // ★ 先剥离行尾注释（// 之后全部丢弃），再做内联命令处理
+            val noComment = line.substringBefore("//")
+            if (noComment.isEmpty()) continue
+
             // 内联命令（行中出现 #）：从该点起生效，后面不参与本行
-            val inlineIdx = line.indexOf('#')
+            val inlineIdx = noComment.indexOf('#')
             val dataPart = if (inlineIdx >= 0) {
                 applyInlineCommand(
-                    line.substring(inlineIdx),
+                    noComment.substring(inlineIdx),
                     onBpm = { currentBpm = it },
                     onMeasure = { s2, m2 -> measureS = s2; measureM = m2 },
                 )
-                line.substring(0, inlineIdx)
-            } else line
+                noComment.substring(0, inlineIdx)
+            } else noComment
 
             val divMs = 15000.0 / currentBpm * (measureS / measureM)
 
