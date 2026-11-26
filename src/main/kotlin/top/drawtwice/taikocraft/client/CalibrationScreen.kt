@@ -44,12 +44,14 @@ class CalibrationScreen(
         lastBeatIndex = -1
         lastPulseAtMs = 0.0
         currentGlobal = TaikoCraftClient.universalOffsetMs
-        // 手动微调默认接着当前全局值
+        // 手动微调从 0 起算；界面上单独显示"当前已生效"，改完显示"将应用 = 推荐/已设置 + 微调"
         manualValue = 0.0
 
         addRenderableWidget(
-            Button.builder(Component.literal("应用推荐值")) {
-                val final = recommended + manualValue
+            Button.builder(Component.literal("应用")) {
+                // 有足够采样就用推荐值，否则在已设置值基础上只加微调
+                val base = if (samples.size >= 5) recommended else currentGlobal
+                val final = base + manualValue
                 TaikoCraftClient.setUniversalOffset(final)
                 onApplied(final)
                 minecraft?.setScreen(previous)
@@ -108,7 +110,20 @@ class CalibrationScreen(
         }
 
         val cx = width / 2
-        guiGraphics.drawCenteredString(font, "延迟校准", cx, height / 3 - 40, 0xFFFFFFFF.toInt())
+        guiGraphics.drawCenteredString(font, "延迟校准", cx, 24, 0xFFFFFFFF.toInt())
+
+        // ★ 已设置值：醒目位置、放大字号
+        guiGraphics.pose().pushPose()
+        guiGraphics.pose().translate((cx - 110).toFloat(), 52f, 0f)
+        guiGraphics.pose().scale(1.4f, 1.4f, 1f)
+        guiGraphics.drawString(
+            font,
+            "当前已设置：${currentGlobal.roundToInt()} ms",
+            0, 0,
+            if (currentGlobal == 0.0) 0xFFAAAAAA.toInt() else 0xFF7FE87F.toInt(),
+        )
+        guiGraphics.pose().popPose()
+
         guiGraphics.drawCenteredString(
             font, "跟着蓝色节拍敲击（任意键，前后都可以）", cx, height / 3 - 20, 0xFFAAAAAA.toInt(),
         )
@@ -124,16 +139,13 @@ class CalibrationScreen(
             )
         }
 
-        // 当前生效值与手动微调
-        guiGraphics.drawCenteredString(
-            font, "当前已生效：${currentGlobal.roundToInt()} ms", cx, height / 3 + 104, 0xFF888888.toInt(),
-        )
+        // 手动微调
         guiGraphics.drawCenteredString(
             font, "手动微调：${manualValue.roundToInt()} ms", cx, height - 55, 0xFFFFFFFF.toInt(),
         )
         guiGraphics.drawCenteredString(
             font,
-            "应用后 = 推荐 ${recommended.roundToInt()} + 手动 ${manualValue.roundToInt()} = ${(recommended + manualValue).roundToInt()} ms",
+            "应用后 = ${if (samples.size >= 5) "推荐 ${recommended.roundToInt()}" else "已设置 ${currentGlobal.roundToInt()}"} + 微调 ${manualValue.roundToInt()} = ${((if (samples.size >= 5) recommended else currentGlobal) + manualValue).roundToInt()} ms",
             cx, height - 90, 0xFF66CCFF.toInt(),
         )
     }

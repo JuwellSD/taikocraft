@@ -1,6 +1,7 @@
 package top.drawtwice.taikocraft.client
 
 import net.minecraft.client.gui.GuiGraphics
+import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.Component
 import top.drawtwice.taikocraft.chart.NoteColor
 import top.drawtwice.taikocraft.judge.Judgment
@@ -8,17 +9,21 @@ import top.drawtwice.taikocraft.judge.Judgment
 /**
  * 下落式谱面界面。
  *
- * 视觉参照 cankao.jpeg：
- * - 左侧：曲名 / 难度 / 得分 / 连击
- * - 右侧：判定条，音符从左往右滚动，判定线在左侧
+ * 视觉参照 cankao.jpeg：左侧信息区，右侧双轨判定条。
  *
- * 坐标约定：判定线固定在 [judgeLineX]；
- * 音符的屏幕位置 = 判定线 + (音符时间 − 当前时间) × 速度，
- * 所以「未来」的音符在判定线**右侧**，随时间向左移动，到判定线时正好该敲。
+ * ## 坐标约定（重要）
+ * 判定线固定在轨道**左侧**，音符从右往左滚：
+ * ```
+ * x = 判定线 + (音符时间 − 当前时间) × 速度
+ * ```
+ * **速度按窗口宽度动态计算**，保证「未来 [visibleAheadMs] 毫秒」恰好铺满整条轨道。
+ *
+ * 踩过的坑：早期版本用固定 0.55 px/ms，在窄窗口（GUI scale 2/3）下
+ * 8 秒 × 0.55 = 4400px 远超轨道宽度，所有音符都画在屏幕外 → 「可见音符 0」。
  */
 class TaikoScreen(
     private val session: PlaySession,
-    private val previous: net.minecraft.client.gui.screens.Screen? = null,
+    @Suppress("UNUSED_PARAMETER") previous: Screen? = null,
 ) : TaikoScreenBase(Component.literal("TaikoCraft")) {
 
     // 配色（红咚 / 蓝咔，参照实机）
@@ -28,12 +33,10 @@ class TaikoScreen(
     private val laneColor = 0xFF3A3A3A.toInt()
     private val judgeLineColor = 0xFFFFFFFF.toInt()
 
-    /** 多少像素/毫秒。0.35 → 1 秒 350px，太慢；提高到 0.55 */
-    private val pixelsPerMs = 0.55
-
-    /** 只绘制这个时间窗内的音符（毫秒）：提前 8 秒可见，晚 0.4 秒仍显示 */
-    private val visibleAheadMs = 8_000.0
-    private val visibleBehindMs = 400.0
+    /** 轨道上可见的「未来时长」：3 秒铺满整条轨道 */
+    private val visibleAheadMs = 3_000.0
+    /** 判定线左侧仍显示已过音符的时长 */
+    private val visibleBehindMs = 250.0
 
     private var debugVisibleNotes = 0
 
@@ -47,10 +50,14 @@ class TaikoScreen(
 
         val now = session.clock.chartTimeMs
         val judgeLineX = (width * 0.16).toInt()
-        val trackRight = width - 12
+        val trackRight = width - 8
         val trackTop = (height * 0.10).toInt()
-        val trackBottom = (height * 0.90).toInt()
+        val trackBottom = (height * 0.88).toInt()
         val laneHeight = (trackBottom - trackTop) / 2
+        val trackWidth = (trackRight - judgeLineX).coerceAtLeast(1)
+
+        /** 动态速度：3 秒铺满轨道宽度 */
+        val pixelsPerMs = trackWidth / visibleAheadMs
 
         // 两条判定轨（1P 上 / 2P 下），Phase 1 只用上轨
         for (lane in 0 until 2) {
@@ -62,25 +69,26 @@ class TaikoScreen(
             guiGraphics.fill(judgeLineX, bottom - 1, trackRight, bottom, laneColor)
         }
 
-        // 音符
+        // ---- 音符 ----
         val notes = session.judge.notesSnapshot()
         debugVisibleNotes = 0
+        val cy = trackTop + laneHeight / 2
         for ((i, note) in notes.withIndex()) {
-            if (session.judge.isJudged(i)) continue
             if (note.player != 1) continue
 
             val deltaMs = note.timeMs - now
-            // 时间窗筛选：未来 8 秒 ~ 过去 0.4 秒
-            if (deltaMs > visibleAheadMs || deltaMs < -visibleBehindMs) continue
+            if (deltaMs > visibleAheadMs) continue      // 还太远
+            if (deltaMs < -visibleBehindMs) continue    // 已过太久
 
             val x = judgeLineX + (deltaMs * pixelsPerMs).toInt()
-            if (x < judgeLineX - 40 || x > trackRight + 20) continue
+            if (x < judgeLineX - 30 || x > trackRight + 30) continue
 
-            val cy = trackTop + laneHeight / 2
+            val judged = session.judge.isJudged(i)
             val r = if (note.big) 15 else 10
-            val color = if (note.color == NoteColor.DON) donColor else kaColor
+            val baseColor = if (note.color == NoteColor.DON) donColor else kaColor
+            // 已判定（Miss 过）的音符画成半透明，方便调试
+            val color = if (judged) baseColor and 0x40FFFFFF else baseColor
 
-            // 外白圈 + 内彩色实心
             guiGraphics.fill(x - r - 2, cy - r - 2, x + r + 2, cy + r + 2, 0xFFFFFFFF.toInt())
             guiGraphics.fill(x - r, cy - r, x + r, cy + r, color)
             if (note.big) {
@@ -89,7 +97,7 @@ class TaikoScreen(
             debugVisibleNotes++
         }
 
-        // 判定文字
+        // ---- 判定文字 ----
         val result = session.lastResult
         if (result != null && now - session.lastResultAtMs < 450) {
             val text = when (result.judgment) {
@@ -106,14 +114,14 @@ class TaikoScreen(
             }
             val scale = if (result.judgment == Judgment.PERFECT) 1.5f else 1.0f
             guiGraphics.pose().pushPose()
-            guiGraphics.pose().translate((judgeLineX + 80).toFloat(), (trackTop + laneHeight / 2 - 30).toFloat(), 0f)
+            guiGraphics.pose().translate((judgeLineX + 60).toFloat(), (cy - 34).toFloat(), 0f)
             guiGraphics.pose().scale(scale, scale, 1f)
             guiGraphics.drawString(font, text, 0, 0, color)
             guiGraphics.pose().popPose()
         }
 
-        // 左侧信息区
-        val left = 12
+        // ---- 左侧信息区 ----
+        val left = 10
         var y = trackTop
         guiGraphics.drawString(font, session.chartFile.displayTitle, left, y, 0xFFFFFFFF.toInt())
         y += 14
@@ -127,27 +135,30 @@ class TaikoScreen(
         y += 14
         guiGraphics.drawString(font, "最高连击：${session.judge.maxComboSeen}", left, y, 0xFF7FE87F.toInt())
 
-        // 调试/状态行
+        // ---- 调试行（定位问题时看这里）----
         y += 18
+        val off = session.clock.universalOffsetMs
         guiGraphics.drawString(
             font,
-            "时间 ${"%.0f".format(now)}ms / ${"%.0f".format(session.chart.lastEventMs)}ms",
+            "时间 ${"%.0f".format(now)} / ${"%.0f".format(session.chart.lastEventMs)} ms",
             left, y, 0xFF666666.toInt(),
         )
-        y += 12
+        y += 11
+        guiGraphics.drawString(font, "偏移 ${"%.0f".format(off)} ms", left, y, 0xFF666666.toInt())
+        y += 11
         guiGraphics.drawString(font, "可见音符：$debugVisibleNotes", left, y, 0xFF666666.toInt())
 
-        // 进度条
+        // ---- 进度条 ----
         val progress = session.progress()
-        val barTop = trackBottom + 20
+        val barTop = trackBottom + 18
         guiGraphics.fill(judgeLineX, barTop, trackRight, barTop + 4, 0xFF333333.toInt())
         guiGraphics.fill(
             judgeLineX, barTop,
-            judgeLineX + ((trackRight - judgeLineX) * progress).toInt(), barTop + 4,
+            judgeLineX + (trackWidth * progress).toInt(), barTop + 4,
             0xFF66CCFF.toInt(),
         )
 
-        guiGraphics.drawString(font, "ESC 退出", left, height - 20, 0xFF666666.toInt())
+        guiGraphics.drawString(font, "ESC 退出", left, height - 18, 0xFF666666.toInt())
     }
 
     override fun isPauseScreen(): Boolean = false
