@@ -34,7 +34,7 @@ class TaikoScreen(
     private val donColor = 0xFFE8453C.toInt()      // 咚：红
     private val kaColor = 0xFF7DD8DC.toInt()       // 咔：青蓝
     private val noteBgColor = 0xFF23262B.toInt()   // 音符内底色
-    private val outerRingColor = 0xFFFFFFFF.toInt() // 外白环
+    private private val outerRingColor = 0xFFFFFFFF.toInt() // 外白环
     private val laneBg = 0xFF2B2E33.toInt()        // 轨道底
     private val laneTopBar = 0xFFE07820.toInt()    // 顶部橙色条
     private val laneBottomBar = 0xFFB0B0B0.toInt() // 底部灰条
@@ -94,8 +94,8 @@ class TaikoScreen(
             if (d > visibleAheadMs || d < -visibleBehindMs) continue
             val x = laneLeft + (d * pixelsPerMs).toInt()
             if (x < laneLeft || x > laneRight) continue
-            guiGraphics.fill(x, lane1Top, x + 1, lane1Bottom, (0x80 shl 24) or 0xFFFFFF)
-            guiGraphics.fill(x, lane2Top, x + 1, lane2Bottom, (0x80 shl 24) or 0xFFFFFF)
+            guiGraphics.fill(x, lane1Top, x + 1, lane1Bottom, 0x80FFFFFF.toInt())
+            guiGraphics.fill(x, lane2Top, x + 1, lane2Bottom, 0x80FFFFFF.toInt())
         }
 
         // ---- 判定线（左侧同心双环，参考图第二张）----
@@ -183,8 +183,8 @@ class TaikoScreen(
     /** 判定线标记：同心双环（参考图左侧的灰色双圈） */
     private fun drawJudgeMarker(g: GuiGraphics, cx: Int, cy: Int, trackH: Int) {
         val r = (trackH * 0.38).toInt().coerceIn(10, 26)
-        drawRing(g, cx, cy, r, 2, judgeRingColor and 0xB0FFFFFF)
-        drawRing(g, cx, cy, r - 5, 2, judgeRingColor and 0x70FFFFFF)
+        drawRing(g, cx, cy, r, 2, judgeRingColor and 0xB0FFFFFF.toInt())
+        drawRing(g, cx, cy, r - 5, 2, judgeRingColor and 0x70FFFFFF.toInt())
     }
 
     /**
