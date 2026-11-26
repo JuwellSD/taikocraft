@@ -248,7 +248,6 @@ class TjaParserTest {
         val file = TjaParser.parse(text.toByteArray(charset("MS932")))
         assertEquals("テスト", file.title)
     }
-}
 
     @Test
     fun `真实谱面回归 - Yuugen no Ran Hard 前 12 小节`() {
