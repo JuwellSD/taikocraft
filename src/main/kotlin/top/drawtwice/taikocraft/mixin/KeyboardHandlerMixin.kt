@@ -20,7 +20,7 @@ import top.drawtwice.taikocraft.client.input.TimedHit
 class KeyboardHandlerMixin {
 
     @Inject(method = ["keyPress"], at = [At("HEAD")])
-    fun taikocraft$onKeyPress(window: Long, key: Int, scancode: Int, action: Int, modifiers: Int, ci: CallbackInfo) {
+    fun onKeyPress(window: Long, key: Int, scancode: Int, action: Int, modifiers: Int, ci: CallbackInfo) {
         if (action != 1) return
         val mapped = TaikoKeyConfig.mapping.toColorSide(key) ?: return
         KeyInputBuffer.push(TimedHit(mapped.first, mapped.second, System.nanoTime()))

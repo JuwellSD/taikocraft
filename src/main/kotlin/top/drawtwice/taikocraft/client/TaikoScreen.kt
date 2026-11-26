@@ -68,7 +68,7 @@ class TaikoScreen(
         for ((i, note) in notes.withIndex()) {
             if (session.judge.isJudged(i)) continue
             if (note.player != 1) continue
-            val dx = (note.timeMs - now) * density
+            val dx = ((note.timeMs - now) * density).toInt()
             val x = judgeLineX + dx
             if (x < trackLeft - 40 || x > trackRight + 40) continue
 
