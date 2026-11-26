@@ -43,3 +43,16 @@
 - 大屏幕渲染、观战延迟补偿
 - 双人音效隔离、旁观者正解音
 - 曲包上传审核 + OP 指令
+
+## 已完成
+
+### 曲包编辑器（2026-11-27）
+> 坠尔需求：osz 里的难度常常很乱
+
+- [x] `OszEditor`（纯逻辑）：改 Title/Artist/Version、删除难度、保留 CRLF、拒绝路径穿越
+- [x] 10 项单测
+- [x] `OszEditorScreen` GUI：曲包/难度切换、输入框编辑、删除标记、导出
+- [x] `OszStorage`：`config/taikocraft/osz/` 扫描，导出到 `osz/out/<原名>_edited.osz`
+- [x] 选曲界面加入口
+
+使用：把 `.osz` 放进 `config/taikocraft/osz/` → 选曲界面点「曲包编辑器」→ 改完导出。
