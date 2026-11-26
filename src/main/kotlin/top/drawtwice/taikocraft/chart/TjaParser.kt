@@ -226,7 +226,9 @@ object TjaParser {
 
             if (branchDepth > 0 && activeBranch != 'N') continue
 
-            // 逐“小节片段”推进时间轴；内联命令从下一条片段生效
+            // 逐“小节片段”推进时间轴。
+            // 注意：小节时长必须在处理片段之前用「当前」BPM/拍号算出来，
+            // 内联 `#BPMCHANGE` 从本片段之后（即下一条片段）才生效。
             val measures = line.split(',')
             var cursor = measureStart
             for (measure in measures) {
@@ -268,9 +270,11 @@ object TjaParser {
                         // '0' 空 / 'F' ADLIB / 'C' 地雷 / 'D' 导火索 / 'G' 紫：Phase 1 不生成音符
                     }
                 }
+
+                // 每条小节末尾都记一条小节线（与音频时间轴对齐）
+                barLines += BarLine(toAudioTime(cursor))
             }
             measureStart = cursor
-            barLines += BarLine(toAudioTime(measureStart))
         }
 
         return Chart(

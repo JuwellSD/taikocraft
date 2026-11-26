@@ -47,10 +47,10 @@ class TjaParserTest {
 
     @Test
     fun `空小节推进时间轴`() {
-        val file = TjaParser.parse(tja(body = ",,,"))
+        val file = TjaParser.parse(tja(body = ",,"))
         val chart = file.charts[0]
-        // 3 个空小节，每个 2000ms
-        assertEquals(6000.0, chart.barLines.last().timeMs, 0.001)
+        // 2 个空小节，每个 2000ms
+        assertEquals(4000.0, chart.barLines.last().timeMs, 0.001)
         assertTrue(chart.notes.isEmpty())
     }
 
@@ -79,9 +79,10 @@ class TjaParserTest {
         """.trimIndent()
         val file = TjaParser.parse(tja(body = body))
         val chart = file.charts[0]
-        // 第一小节 @120 = 2000ms，第二小节 @240 = 1000ms
-        assertEquals(2000.0, chart.notes[0].timeMs, 0.001)
+        // 第一小节 @120 = 2000ms；#BPMCHANGE 240 之后第二小节 = 1000ms
+        assertEquals(0.0, chart.notes[0].timeMs, 0.001)
         assertEquals(2000.0, chart.notes[1].timeMs, 0.001)
+        assertEquals(2000.0, chart.barLines[0].timeMs, 0.001)
         assertEquals(3000.0, chart.barLines[1].timeMs, 0.001)
     }
 

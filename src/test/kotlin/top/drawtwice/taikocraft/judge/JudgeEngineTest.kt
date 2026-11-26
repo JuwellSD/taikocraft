@@ -58,7 +58,7 @@ class JudgeEngineTest {
         assertEquals(1, e.currentCombo)
         e.advanceTo(2500.0)
         assertEquals(0, e.currentCombo)
-        assertEquals(1, e.judgedCount()) // 第一个已判定，第二个被 Miss
+        assertEquals(2, e.judgedCount()) // 第一个已判定；第二个 2000+108=2108 < 2500，判 Miss
     }
 
     @Test
