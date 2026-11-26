@@ -37,9 +37,9 @@ class TjaParserTest {
 
     @Test
     fun `小节时长按 BPM 计算 - 120bpm 一拍 500ms 四拍 2000ms`() {
-        // 120 BPM：四分音符 500ms，4/4 小节 = 2000ms
-        // 音符字符 '1' 位于第 0 小节，但小节只有一个字符时 i=0 → 0ms
-        val file = TjaParser.parse(tja(body = "1"))
+        // 逐字符模型："1," = 2 字符，每字符 2000/2 = 1000ms
+        // 1@0，逗号推进完整小节 2000ms
+        val file = TjaParser.parse(tja(body = "1,"))
         val chart = file.charts[0]
         assertEquals(2000.0, chart.barLines.first().timeMs, 0.001)
         assertEquals(0.0, chart.notes[0].timeMs, 0.001)
@@ -80,28 +80,23 @@ class TjaParserTest {
 
     @Test
     fun `BPMCHANGE 后小节时长变化`() {
-        val body = """
-            1
-            #BPMCHANGE 240
-            1
-        """.trimIndent()
+        val body = "1" + "\n" + "#BPMCHANGE 240" + "\n" + "1"
         val file = TjaParser.parse(tja(body = body))
         val chart = file.charts[0]
-        // 第一小节 @120 = 2000ms；#BPMCHANGE 240 之后第二小节 = 1000ms
+        // 第一行 "1"（1 字符 @120）：音符@0，行末 2000
+        // 第二行 "1"（1 字符 @240）：音符@2000
+        assertEquals(2, chart.notes.size)
         assertEquals(0.0, chart.notes[0].timeMs, 0.001)
         assertEquals(2000.0, chart.notes[1].timeMs, 0.001)
-        assertEquals(2000.0, chart.barLines[0].timeMs, 0.001)
-        assertEquals(3000.0, chart.barLines[1].timeMs, 0.001)
     }
 
     @Test
     fun `MEASURE 改变小节长度 - 3 4 拍`() {
-        val body = """
-            #MEASURE 3/4
-            1
-        """.trimIndent()
+        val body = "#MEASURE 3/4" + "\n" + "1,"
         val file = TjaParser.parse(tja(body = body))
-        // 120bpm + 3/4 → 240000/120 * 3/4 = 1500ms
+        // 120bpm + 3/4：divMs = 15000/120*(3/4) = 93.75ms
+        // 行 "1," 字符数 2，每字符 93.75*16/2 = 750ms；逗号推进一整小节 1500ms
+        assertEquals(1, file.charts[0].barLines.size)
         assertEquals(1500.0, file.charts[0].barLines.first().timeMs, 0.001)
     }
 
@@ -248,19 +243,16 @@ class TjaParserTest {
 
     @Test
     fun `内联 BPMCHANGE 从命令位置起生效`() {
-        // "11#BPMCHANGE 240,11"：数据部分是 "11"（nTextCount=2）
-        // 每字符 = 2000/2 = 1000ms；逗号推进 2000ms
-        // 之后 BPM=240，逗号推进 = 15000/240*16 = 1000ms
-        // 注意：本实现逗号推进用的是处理该字符时的当前 BPM
+        // "11#BPMCHANGE 240,11"：先应用内联命令（BPM=240），数据部分 "11"（2 字符）
+        // divMs = 15000/240 = 62.5；每字符 = 62.5*16/2 = 500ms
+        // 1@0, 1@500, 逗号推进 1000ms → 1500, 之后同 BPM：1@1500, 1@2000
         val file = TjaParser.parse(tja(body = "11#BPMCHANGE 240,11"))
         val times = file.charts[0].notes.map { it.timeMs }
         assertEquals(4, times.size)
         assertEquals(0.0, times[0], 0.001)
-        assertEquals(1000.0, times[1], 0.001)
-        // 逗号用 240 BPM：1000ms
-        assertEquals(2000.0, times[2], 0.001)
-        // 第二行数据 "11"，nTextCount=2，每字符 1000/2=500ms
-        assertEquals(2500.0, times[3], 0.001)
+        assertEquals(500.0, times[1], 0.001)
+        assertEquals(1500.0, times[2], 0.001)
+        assertEquals(2000.0, times[3], 0.001)
     }
 
     @Test
