@@ -158,11 +158,12 @@ class TjaParserTest {
 
     @Test
     fun `连打起止 5 到 8`() {
-        // "1,5,8,2," → 每小节 1 个字符（各占 2000ms）
+        // "1,5,8,2," → 5 个字符 + 3 个逗号，每个小节 1 div
+        // divsPerMeasure = [2, 2, 2, 1]（每段 1 字符 + 逗号结算）
         val chart = TjaParser.parse(tja(body = "1,5,8,2,")).charts[0]
         assertEquals(1, chart.rolls.size)
-        assertEquals(2000.0, chart.rolls[0].startMs, 0.001)
-        assertEquals(4000.0, chart.rolls[0].endMs, 0.001)
+        assertEquals(500.0, chart.rolls[0].startMs, 0.001)
+        assertEquals(2500.0, chart.rolls[0].endMs, 0.001)
         assertEquals(false, chart.rolls[0].big)
         assertEquals(2, chart.notes.size)
     }
@@ -180,7 +181,7 @@ class TjaParserTest {
         assertEquals(1, chart.balloons.size)
         assertEquals(12, chart.balloons[0].requiredHits)
         assertEquals(0.0, chart.balloons[0].startMs, 0.001)
-        assertEquals(2000.0, chart.balloons[0].endMs, 0.001)
+        assertEquals(1000.0, chart.balloons[0].endMs, 0.001)
     }
 
     @Test
@@ -235,11 +236,12 @@ class TjaParserTest {
 
     @Test
     fun `行尾注释被剥离`() {
-        // "1111,//55" → 数据 "1111,"，与不含注释完全一致
+        // "1111,//55" → 数据 "1111,"（注释剥离后与原行完全一致）
         val withC = TjaParser.parse(tja(body = "1111,//55" + "\n" + "1111,")).charts[0]
         val withoutC = TjaParser.parse(tja(body = "1111," + "\n" + "1111,")).charts[0]
         assertEquals(withoutC.notes.map { it.timeMs }, withC.notes.map { it.timeMs })
         assertEquals(withoutC.barLines.map { it.timeMs }, withC.barLines.map { it.timeMs })
+        assertEquals(8, withC.notes.size)
     }
 
     @Test
