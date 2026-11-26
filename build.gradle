@@ -105,6 +105,10 @@ dependencies {
     // KotlinForForge：运行时提供 Kotlin 语言加载器 + stdlib；编译期提供 @Mod 的 Kotlin 语言支持
     implementation "thedarkcolour:kotlinforforge-neoforge:${kff_version}"
 
+    // MP3 解码（mp3spi + JLayer，LGPL-2.1）。
+    // ⚠️ LGPL 合规：仅 audio/Mp3Decoder.kt 引用这两者，替换实现只需改那一个文件。
+    implementation "com.googlecode.soundlibs:mp3spi:1.9.5.4"
+
     // 纯逻辑层单测（chart/judge 不依赖 Minecraft，可在本机 JVM 跑）
     testImplementation "org.junit.jupiter:junit-jupiter:5.11.4"
     testImplementation "org.jetbrains.kotlin:kotlin-test-junit5:${kotlin_version}"

@@ -150,7 +150,8 @@ class OpenAlPlayback private constructor(
             val decoded = when (ext) {
                 "ogg" -> decodeOgg(Files.readAllBytes(path))
                 "wav" -> decodeWav(path)
-                else -> throw IllegalArgumentException("不支持的音频格式：.$ext（Phase 1 仅支持 ogg / wav）")
+                "mp3" -> Mp3Decoder.decode(path)
+                else -> throw IllegalArgumentException("不支持的音频格式：.$ext（支持 ogg / wav / mp3）")
             }
             return createFrom(decoded, silent)
         }

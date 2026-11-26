@@ -48,7 +48,7 @@ class SongLibrary(private val root: Path) {
 
     private fun scanSong(dir: Path): SongEntry? {
         val files = Files.list(dir).use { it.toList() }
-        val audio = files.firstOrNull { it.extension.lowercase() in setOf("ogg", "wav") }
+        val audio = files.firstOrNull { it.extension.lowercase() in setOf("ogg", "mp3", "wav") }
         val difficulties = mutableListOf<DifficultyEntry>()
 
         for (file in files) {
