@@ -40,14 +40,10 @@ class SongLibrary(private val root: Path) {
 
     fun listSongs(): List<SongEntry> {
         if (!Files.isDirectory(root)) return emptyList()
-        return Files.list(root).use { stream ->
-            stream.filter { Files.isDirectory(it) }
-                .map { dir -> scanSong(dir) }
-                .filter { it != null }
-                .map { it!! }
-                .sortedBy { it.title }
-                .toList()
+        val dirs = Files.list(root).use { stream ->
+            stream.filter { Files.isDirectory(it) }.toList()
         }
+        return dirs.mapNotNull { scanSong(it) }.sortedBy { it.title }
     }
 
     private fun scanSong(dir: Path): SongEntry? {

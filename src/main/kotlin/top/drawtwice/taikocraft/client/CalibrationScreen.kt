@@ -7,7 +7,7 @@ import net.minecraft.network.chat.Component
 import top.drawtwice.taikocraft.audio.PlaybackClock
 import top.drawtwice.taikocraft.chart.NoteColor
 import top.drawtwice.taikocraft.client.input.KeyInputBuffer
-import top.drawtwice.taikocraft.client.input.Side
+import top.drawtwice.taikocraft.judge.Side
 import kotlin.math.roundToInt
 
 /**
