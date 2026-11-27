@@ -68,27 +68,26 @@ object NoteSkinManager {
         isDon: Boolean, big: Boolean, alpha: Int,
         fallback: (GuiGraphics, Int, Int, Int, Int) -> Unit,
     ) {
-        if (current == NoteSkin.ORIGINAL && alpha >= 200 && !big) {
-            // 原版风格：取 Notes.png 的第 0（咚）或第 1（咔）帧
+        val useTexture = current == NoteSkin.ORIGINAL && alpha >= 200 && !big
+        if (useTexture) {
+            // 原版风格：Notes.png 的帧 0（咚）/ 帧 1（咔）
             val frame = if (isDon) 0 else 1
-            val size = r * 2
-            val x = cx - r
-            val y = cy - r
-            runCatching {
+            val size = (r * 2).toFloat()
+            val ok = runCatching {
                 g.blit(
                     ORIGINAL_NOTES,
-                    x, y, size, size,
-                    frame * NOTES_FRAME_W, 0,
+                    (cx - r).toFloat(), (cy - r).toFloat(),
+                    size, size,
+                    (frame * NOTES_FRAME_W).toFloat(), 0f,
                     NOTES_FRAME_W, NOTES_FRAME_H,
                     NOTES_FRAME_W * NOTES_FRAMES, NOTES_FRAME_H,
                 )
-            }.onFailure {
-                // 贴图缺失时回退到代码绘制
-                fallback(g, cx, cy, r, alpha, if (isDon) 0xFFE8453C.toInt() else 0xFF4FC3D9.toInt())
-            }
-        } else {
-            fallback(g, cx, cy, r, alpha, if (isDon) 0xFFE8453C.toInt() else 0xFF4FC3D9.toInt())
+                true
+            }.getOrDefault(false)
+            if (ok) return
         }
+        // 回退：代码绘制
+        fallback(g, cx, cy, r, alpha, if (isDon) 0xFFE8453C.toInt() else 0xFF4FC3D9.toInt())
     }
 
     /** 原版风格的连打条是否可用 */

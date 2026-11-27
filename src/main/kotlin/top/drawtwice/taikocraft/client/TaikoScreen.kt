@@ -158,10 +158,10 @@ class TaikoScreen(
     /** 音符：按当前材质风格绘制（代码圆 / OpenTaiko 贴图） */
     private fun drawNote(g: GuiGraphics, cx: Int, cy: Int, r: Int, color: Int, alpha: Int, big: Boolean) {
         val isDon = color == donColor
-        NoteSkinManager.drawNote(g, cx, cy, r, isDon, big, alpha) { gg, x, y, rr, aa, cc ->
+        NoteSkinManager.drawNote(g, cx, cy, r, isDon, big, alpha) { gg, x, y, rr, aa ->
             val a = aa.coerceIn(0, 255) shl 24
             drawDisc(gg, x, y, rr, a or 0xFFFFFF, 1)
-            drawDisc(gg, x, y, (rr - 4).coerceAtLeast(2), a or (cc and 0xFFFFFF), 1)
+            drawDisc(gg, x, y, (rr - 4).coerceAtLeast(2), a or (color and 0xFFFFFF), 1)
             if (big) drawDisc(gg, x, y, (rr / 5).coerceAtLeast(2), a or 0xFFFFFF, 1)
         }
     }
