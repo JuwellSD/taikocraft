@@ -97,8 +97,8 @@ class TaikoScreen(
     }
 
     private fun drawNotes(g: GuiGraphics, now: Double, notes: List<top.drawtwice.taikocraft.chart.Note>) {
-        drawJudgeCircle(guiGraphics, center1P)
-        if (show2P) drawJudgeCircle(guiGraphics, center2P)
+        drawJudgeCircle(g, center1P)
+        if (show2P) drawJudgeCircle(g, center2P)
 
         val maxN4 = (laneRight - judgeX) / beatSpan
         val maxBpm = notes.maxOfOrNull { it.bpmAtNote } ?: 200.0
@@ -121,12 +121,12 @@ class TaikoScreen(
             val judged = session.judge.isJudged(idx)
             val alpha = if (judged) 45 else 255
             val r = if (note.big) (noteR * 5 / 4) else noteR
-            drawNote(guiGraphics, x, cy, r, note.color == NoteColor.DON, note.big, alpha)
+            drawNote(g, x, cy, r, note.color == NoteColor.DON, note.big, alpha)
         }
     }
 
     private fun drawNote(g: GuiGraphics, cx: Int, cy: Int, r: Int, isDon: Boolean, big: Boolean, alpha: Int) {
-        NoteSkinManager.drawNote(guiGraphics, cx, cy, r, isDon, big, alpha) { g, x, y, rr, aa ->
+        NoteSkinManager.drawNote(g, cx, cy, r, isDon, big, alpha) { g, x, y, rr, aa ->
             val a = aa.coerceIn(0, 255) shl 24
             val c = if (isDon) donColor else kaColor
             drawDisc(g, x, y, rr, a or 0xFFFFFF, 1)
@@ -141,7 +141,7 @@ class TaikoScreen(
             val x1 = timeToX(roll.startMs, now)
             val x2 = timeToX(roll.endMs, now)
             if (x2 < judgeX - noteR) continue
-            drawBar(guiGraphics, x1, x2, center1P, true)
+            drawBar(g, x1, x2, center1P, true)
         }
     }
 
@@ -151,13 +151,13 @@ class TaikoScreen(
             val x1 = timeToX(balloon.startMs, now)
             val x2 = timeToX(balloon.endMs, now)
             if (x2 < judgeX - noteR) continue
-            drawBar(guiGraphics, x1, x2, center1P, false)
+            drawBar(g, x1, x2, center1P, false)
 
             val mid = (maxOf(x1, judgeX) + minOf(x2, laneRight)) / 2
             val remain = (balloon.requiredHits - session.judge.balloonHitsOf(balloon)).coerceAtLeast(0)
-            drawDisc(guiGraphics, mid, center1P, laneH / 2, 0xFFFFFFFF.toInt(), 1)
-            drawDisc(guiGraphics, mid, center1P, laneH / 2 - 3, 0xFF5BA3C9.toInt(), 1)
-            guiGraphics.drawCenteredString(font, remain.toString(), mid, center1P - 4, 0xFFFFFFFF.toInt())
+            drawDisc(g, mid, center1P, laneH / 2, 0xFFFFFFFF.toInt(), 1)
+            drawDisc(g, mid, center1P, laneH / 2 - 3, 0xFF5BA3C9.toInt(), 1)
+            g.drawCenteredString(font, remain.toString(), mid, center1P - 4, 0xFFFFFFFF.toInt())
         }
     }
 

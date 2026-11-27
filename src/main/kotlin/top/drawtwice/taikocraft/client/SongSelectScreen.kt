@@ -70,7 +70,6 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
                 minecraft?.setScreen(ImportScreen(this))
             }.bounds(162, row1, 80, btnH).build(),
         )
-        )
         addRenderableWidget(
             Button.builder(Component.literal("材质：${NoteSkinManager.current.displayName}")) { btn ->
                 NoteSkinManager.current =
