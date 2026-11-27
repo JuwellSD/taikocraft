@@ -102,8 +102,8 @@ class PlaySession(
 
     fun tick() {
         playback?.let { player ->
-            // ★ 不再每帧用后端位置覆盖时钟（那是突进的根源）
-            // 只在开始时对齐一次；运行中也仅在严重偏离时才纠正
+            // ★ 音频位置是主时钟（解决 520ms 系统性延迟）
+            clock.updateFromBackend(player.positionMs())
             player.setVolume(volume)
             if (player.tick() && clock.isPlaying) {
                 clock.pause()

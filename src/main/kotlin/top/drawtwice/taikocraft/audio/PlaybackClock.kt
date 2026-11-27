@@ -62,10 +62,39 @@ class PlaybackClock(
 
     private var playing = false
 
-    /** 当前歌曲播放位置（毫秒），单调递增 */
+    /**
+     * 音频后端报告的真实播放位置（毫秒）。
+     *
+     * ## 为什么必须用这个而不是纯系统时钟
+     * 坠尔实测：校准推荐 -80ms，但舒适值是 +440ms，**系统性差 520ms**。
+     *
+     * 原因是我的旧实现以 `System.nanoTime()` 为唯一时钟源：
+     * 从「我们决定开始播放」那一刻起算，但音频真正出声要经过
+     * OpenAL 缓冲填充 + 驱动混音 + 声卡输出，这 500ms 左右的延迟
+     * 完全不在我的时钟里 → 画面永远比声音早。
+     *
+     * 正确做法（OpenTaiko 的 SoundTimer 思路）：
+     * **以音频实际播放位置为主时钟**，画面跟着音频走。
+     * 后端每次 tick 报告位置，时钟以它为基准，系统时钟只在两次报告之间插值。
+     */
+    private var backendPositionMs: Double = -1.0
+    private var backendAtNanos: Long = 0L
+    /** 后端是否已经报告过位置（首次报告前用系统时钟兜底） */
+    private var hasBackend = false
+
+    /** 当前歌曲播放位置（毫秒）：优先用音频后端位置 + 插值 */
     val songPositionMs: Double
-        get() = if (!playing) pausedPositionMs
-        else startPositionMs + (System.nanoTime() - startNanos) / 1_000_000.0
+        get() {
+            if (!playing) return pausedPositionMs
+            return if (hasBackend) {
+                // 音频位置 + 自上次报告以来经过的时间（插值，最大 100ms 防漂移）
+                val since = ((System.nanoTime() - backendAtNanos) / 1_000_000.0).coerceIn(0.0, 100.0)
+                backendPositionMs + since
+            } else {
+                // 后端还没报告（解码中/静默模式），用系统时钟兜底
+                startPositionMs + (System.nanoTime() - startNanos) / 1_000_000.0
+            }
+        }
 
     fun start(fromMs: Double = 0.0) {
         startPositionMs = fromMs
@@ -120,9 +149,30 @@ class PlaybackClock(
         }
     }
 
-    /** 兼容旧接口：忽略（主时钟已经是系统时钟） */
+    /**
+     * 每帧由音频后端报告真实播放位置 —— **这是主时钟来源**。
+     *
+     * 只在位置前进时接受（防回跳），且限速（防驱动跳变导致突进）。
+     */
     fun updateFromBackend(positionMs: Double) {
-        // 故意不做任何事：每帧对齐会导致回跳/突进
+        if (!playing) return
+        if (positionMs < 0) return
+        if (!hasBackend) {
+            backendPositionMs = positionMs
+            backendAtNanos = System.nanoTime()
+            hasBackend = true
+            return
+        }
+        // 只允许小幅前进（防止 AL_SAMPLE_OFFSET 在缓冲边界跳变）
+        val drift = positionMs - backendPositionMs
+        if (drift > 0 && drift < 200.0) {
+            backendPositionMs = positionMs
+            backendAtNanos = System.nanoTime()
+        } else if (drift >= 200.0) {
+            // 大跳变：可能是 seek/恢复，直接接受
+            backendPositionMs = positionMs
+            backendAtNanos = System.nanoTime()
+        }
     }
 
     /**

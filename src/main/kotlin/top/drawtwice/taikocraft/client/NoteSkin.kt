@@ -68,7 +68,8 @@ object NoteSkinManager {
         isDon: Boolean, big: Boolean, alpha: Int,
         fallback: (GuiGraphics, Int, Int, Int, Int) -> Unit,
     ) {
-        val useTexture = current == NoteSkin.ORIGINAL && alpha >= 200 && !big
+        // 坠尔要求：全部使用原版贴图，不做风格选择
+        val useTexture = true
         if (useTexture) {
             // 原版风格：Notes.png 的帧 0（咚）/ 帧 1（咔）
             val frame = if (isDon) 0 else 1
@@ -88,6 +89,46 @@ object NoteSkinManager {
         // 回退：代码绘制
         fallback(g, cx, cy, r, alpha)
     }
+
+    /**
+     * 画长条（Roll）或气球（Balloon）。
+     *
+     * 用 `roll.png` / `balloon.png` 的中间段平铺 + 端头圆。
+     * 返回 true 表示已用贴图绘制。
+     */
+    fun drawRollOrBalloon(
+        g: GuiGraphics, left: Int, right: Int, cy: Int, laneH: Int, isRoll: Boolean,
+    ): Boolean {
+        if (right <= left) return false
+        val tex = if (isRoll) ORIGINAL_ROLL else ORIGINAL_BALLOON
+        val texW = if (isRoll) ROLL_TEX_W else BALLOON_TEX_W
+        val texH = if (isRoll) ROLL_TEX_H else BALLOON_TEX_H
+        if (texW <= 0 || texH <= 0) return false
+
+        val h = (laneH * 0.8).toInt().coerceAtLeast(10)
+        return runCatching {
+            // 中间段：取贴图中心 1/3 区域横向拉伸平铺
+            val u = texW / 3
+            val v = 0
+            val uW = texW / 3
+            val vH = texH
+            val midLeft = left + h / 2
+            val midRight = right - h / 2
+            if (midRight > midLeft) {
+                g.blit(tex, midLeft, cy - h / 2, (midRight - midLeft).toFloat(), h.toFloat(), u, v, uW, vH, texW, texH)
+            }
+            // 两端：取贴图左右各 1/6 作为端头
+            g.blit(tex, left, cy - h / 2, h.toFloat(), h.toFloat(), 0, v, uW / 2, vH, texW, texH)
+            g.blit(tex, right - h, cy - h / 2, h.toFloat(), h.toFloat(), texW - uW / 2, v, uW / 2, vH, texW, texH)
+            true
+        }.getOrDefault(false)
+    }
+
+    // 贴图尺寸（从文件读到的实际值）
+    private const val ROLL_TEX_W = 2505
+    private const val ROLL_TEX_H = 306
+    private const val BALLOON_TEX_W = 300
+    private const val BALLOON_TEX_H = 240
 
     /** 原版风格的连打条是否可用 */
     fun hasOriginalRoll(): Boolean = current == NoteSkin.ORIGINAL
