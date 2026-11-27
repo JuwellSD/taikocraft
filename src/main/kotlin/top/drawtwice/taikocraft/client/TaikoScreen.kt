@@ -155,12 +155,15 @@ class TaikoScreen(
         }
     }
 
-    /** 音符：白边 + 彩色实心（OpenTaiko 默认皮肤风格） */
+    /** 音符：按当前材质风格绘制（代码圆 / OpenTaiko 贴图） */
     private fun drawNote(g: GuiGraphics, cx: Int, cy: Int, r: Int, color: Int, alpha: Int, big: Boolean) {
-        val a = alpha.coerceIn(0, 255) shl 24
-        drawDisc(g, cx, cy, r, a or 0xFFFFFF, 1)
-        drawDisc(g, cx, cy, (r - 4).coerceAtLeast(2), a or (color and 0xFFFFFF), 1)
-        if (big) drawDisc(g, cx, cy, (r / 5).coerceAtLeast(2), a or 0xFFFFFF, 1)
+        val isDon = color == donColor
+        NoteSkinManager.drawNote(g, cx, cy, r, isDon, big, alpha) { gg, x, y, rr, aa, cc ->
+            val a = aa.coerceIn(0, 255) shl 24
+            drawDisc(gg, x, y, rr, a or 0xFFFFFF, 1)
+            drawDisc(gg, x, y, (rr - 4).coerceAtLeast(2), a or (cc and 0xFFFFFF), 1)
+            if (big) drawDisc(gg, x, y, (rr / 5).coerceAtLeast(2), a or 0xFFFFFF, 1)
+        }
     }
 
     // ==================================================================

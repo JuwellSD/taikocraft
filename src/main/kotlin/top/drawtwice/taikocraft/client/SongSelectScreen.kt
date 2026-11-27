@@ -71,6 +71,15 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
             }.bounds(162, row1, 80, btnH).build(),
         )
         addRenderableWidget(
+            Button.builder(Component.literal("材质：${NoteSkinManager.current.displayName}")) { btn ->
+                NoteSkinManager.current =
+                    if (NoteSkinManager.current == NoteSkin.MC) NoteSkin.ORIGINAL else NoteSkin.MC
+                btn.message = Component.literal("材质：${NoteSkinManager.current.displayName}")
+                // 持久化
+                TaikoCraftClient.setOffsets(TaikoCraftClient.visualOffsetMs, TaikoCraftClient.audioOffsetMs)
+            }.bounds(334, row1, 130, btnH).build(),
+        )
+        addRenderableWidget(
             Button.builder(Component.literal("AUTO: 关")) { btn ->
                 if (!AutoPlayPermission.canUse()) {
                     statusMessage = "AutoPlay 需要 OP 权限（等级 2）"

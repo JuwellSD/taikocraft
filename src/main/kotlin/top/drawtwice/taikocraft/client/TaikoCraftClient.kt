@@ -80,6 +80,9 @@ class TaikoCraftClient(modEventBus: IEventBus) {
                         top.drawtwice.taikocraft.client.input.KeyScheme.CUSTOM
                     TaikoCraft.LOGGER.info("已加载自定义键位")
                 }
+                // 材质风格
+                NoteSkinManager.current = NoteSkin.fromName(props.getProperty("noteSkin"))
+                TaikoCraft.LOGGER.info("已加载材质风格：{}", NoteSkinManager.current.displayName)
             }.onFailure {
                 TaikoCraft.LOGGER.warn("读取设置失败：{}", it.message)
             }
@@ -98,6 +101,7 @@ class TaikoCraftClient(modEventBus: IEventBus) {
                 props.setProperty("key.leftKa", m.leftKa.toString())
                 props.setProperty("key.rightDon", m.rightDon.toString())
                 props.setProperty("key.rightKa", m.rightKa.toString())
+                props.setProperty("noteSkin", NoteSkinManager.current.name)
                 Files.newOutputStream(path).use { props.store(it, "TaikoCraft settings") }
             }.onFailure {
                 TaikoCraft.LOGGER.warn("保存设置失败：{}", it.message)
