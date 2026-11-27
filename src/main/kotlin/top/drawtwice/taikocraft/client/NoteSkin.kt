@@ -51,6 +51,36 @@ object NoteSkinManager {
 
     /** 当前材质（由设置在运行中修改） */
     var current: NoteSkin = NoteSkin.MC
+        set(value) {
+            field = value
+            if (value == NoteSkin.ORIGINAL) verifyTextures()
+        }
+
+    private var verified = false
+
+    /**
+     * 校验贴图是否真的能加载。
+     * 之前「原版风格什么都不显示」的根因就是文件名大小写不匹配导致的静默失败。
+     */
+    fun verifyTextures() {
+        if (verified) return
+        verified = true
+        val mc = Minecraft.getInstance()
+        val rm = mc.resourceManager
+        for ((name, loc) in listOf(
+            "notes" to ORIGINAL_NOTES,
+            "roll" to ORIGINAL_ROLL,
+            "balloon" to ORIGINAL_BALLOON,
+            "hitcircle" to ORIGINAL_HITCIRCLE,
+        )) {
+            val exists = runCatching { rm.getResource(loc).isPresent }.getOrDefault(false)
+            if (exists) {
+                TaikoCraft.LOGGER.info("贴图 OK：{}", name)
+            } else {
+                TaikoCraft.LOGGER.error("★ 贴图缺失：{}（{}）—— 将回退到代码绘制", name, loc)
+            }
+        }
+    }
 
     // 精灵表尺寸（用于计算 UV）
     private const val NOTES_FRAMES = 6
@@ -68,8 +98,8 @@ object NoteSkinManager {
         isDon: Boolean, big: Boolean, alpha: Int,
         fallback: (GuiGraphics, Int, Int, Int, Int) -> Unit,
     ) {
-        // 坠尔要求：全部使用原版贴图，不做风格选择
-        val useTexture = true
+        // 根据当前材质风格决定：ORIGINAL 用贴图，MC 用代码绘制
+        val useTexture = current == NoteSkin.ORIGINAL
         if (useTexture) {
             // 原版风格：Notes.png 的帧 0（咚）/ 帧 1（咔）
             val frame = if (isDon) 0 else 1
