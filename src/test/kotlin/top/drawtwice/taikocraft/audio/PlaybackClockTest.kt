@@ -103,15 +103,32 @@ class PlaybackClockTest {
     }
 
     @Test
-    fun `updateFromBackend 不改变位置（防突进）`() {
+    fun `updateFromBackend 是主时钟来源`() {
+        // 架构变更（2026-11-28）：音频后端位置成为主时钟，
+        // 用于消除 520ms 的系统性音画延迟。
         val clock = PlaybackClock()
         clock.start()
-        Thread.sleep(20)
-        val before = clock.songPositionMs
-        clock.updateFromBackend(999999.0)
-        val after = clock.songPositionMs
-        assertTrue(after >= before, "位置不应回退")
-        assertTrue(after - before < 100.0, "后端值不应造成突进")
+        clock.updateFromBackend(1000.0)
+        val pos = clock.songPositionMs
+        assertEquals(1000.0, pos, 30.0, "应以上报的音频位置为基准")
+
+        // 小幅前进应被接受
+        clock.updateFromBackend(1050.0)
+        assertEquals(1050.0, clock.songPositionMs, 30.0)
+
+        // 大幅跳变（>200ms）也应接受（seek/恢复场景）
+        clock.updateFromBackend(5000.0)
+        assertEquals(5000.0, clock.songPositionMs, 30.0)
+    }
+
+    @Test
+    fun `后端未上报时用系统时钟兜底`() {
+        val clock = PlaybackClock()
+        clock.start()
+        val a = clock.songPositionMs
+        Thread.sleep(25)
+        val b = clock.songPositionMs
+        assertTrue(b > a, "无后端数据时应由系统时钟推进")
     }
 
     @Test
