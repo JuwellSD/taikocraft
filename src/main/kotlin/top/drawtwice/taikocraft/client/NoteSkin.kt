@@ -104,6 +104,7 @@ object NoteSkinManager {
         val texW = if (isRoll) ROLL_TEX_W else BALLOON_TEX_W
         val texH = if (isRoll) ROLL_TEX_H else BALLOON_TEX_H
         if (texW <= 0 || texH <= 0) return false
+        @Suppress("UNUSED_VARIABLE") val unusedH = texH
 
         val h = (laneH * 0.8).toInt().coerceAtLeast(10)
         return runCatching {
@@ -115,11 +116,11 @@ object NoteSkinManager {
             val midLeft = left + h / 2
             val midRight = right - h / 2
             if (midRight > midLeft) {
-                g.blit(tex, midLeft, cy - h / 2, (midRight - midLeft).toFloat(), h.toFloat(), u, v, uW, vH, texW, texH)
+                g.blit(tex, midLeft, cy - h / 2, (midRight - midLeft).toFloat(), h.toFloat(), u, v, uW, vH)
             }
             // 两端：取贴图左右各 1/6 作为端头
-            g.blit(tex, left, cy - h / 2, h.toFloat(), h.toFloat(), 0, v, uW / 2, vH, texW, texH)
-            g.blit(tex, right - h, cy - h / 2, h.toFloat(), h.toFloat(), texW - uW / 2, v, uW / 2, vH, texW, texH)
+            g.blit(tex, left, cy - h / 2, h.toFloat(), h.toFloat(), 0, v, uW / 2, vH)
+            g.blit(tex, right - h, cy - h / 2, h.toFloat(), h.toFloat(), texW - uW / 2, v, uW / 2, vH)
             true
         }.getOrDefault(false)
     }
