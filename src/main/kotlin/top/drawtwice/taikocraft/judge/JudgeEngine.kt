@@ -47,7 +47,10 @@ class JudgeEngine(
         rolls.firstOrNull { event.timeMs in it.startMs..it.endMs }?.let { roll ->
             score += if (roll.big) 200 else 100
             combo++; maxCombo = maxOf(maxCombo, combo)
-            return JudgeResult(Judgment.PERFECT, null, event.color, roll.big, fromRollOrBalloon = true)
+            return JudgeResult(
+                Judgment.PERFECT, null, event.color, roll.big, fromRollOrBalloon = true,
+                side = event.side, player = roll.player,
+            )
         }
 
         balloons.firstOrNull { event.timeMs in it.startMs..it.endMs }?.let { b ->
@@ -58,6 +61,7 @@ class JudgeEngine(
                 return JudgeResult(
                     Judgment.PERFECT, null, NoteColor.DON, false, fromRollOrBalloon = true,
                     balloonHits = balloonHits[idx], balloonRequired = b.requiredHits,
+                    side = event.side, player = b.player,
                 )
             }
         }
@@ -73,7 +77,10 @@ class JudgeEngine(
             else -> return null
         }
         judged[idx] = true
-        val result = JudgeResult(judgment, note.timeMs, note.color, note.big, bigCompleted = !note.big)
+        val result = JudgeResult(
+            judgment, note.timeMs, note.color, note.big, bigCompleted = !note.big,
+            side = event.side, player = note.player,
+        )
         if (note.big) pendingBig[idx] = PendingBig(event.timeMs, note.color, judgment)
         register(result, note)
         return result
@@ -86,7 +93,10 @@ class JudgeEngine(
             if (event.timeMs - p.firstTimeMs > config.bigPairWindowMs) continue
             pendingBig.remove(idx)
             val note = notes[idx]
-            val r = JudgeResult(p.judgment, note.timeMs, note.color, true, bigCompleted = true)
+            val r = JudgeResult(
+                p.judgment, note.timeMs, note.color, true, bigCompleted = true,
+                side = event.side, player = note.player,
+            )
             register(r, note)
             return r
         }
@@ -132,7 +142,13 @@ class JudgeEngine(
 
     private fun register(r: JudgeResult, note: Note) {
         when (r.judgment) {
-            Judgment.PERFECT -> { combo++; score += if (note.big && r.bigCompleted) 600 else if (note.big) 300 else 300 }
+            Judgment.PERFECT -> {
+                combo++
+                score += when {
+                    note.big && r.bigCompleted -> 600
+                    else -> 300
+                }
+            }
             Judgment.GOOD -> { combo++; score += if (note.big) 200 else 100 }
             Judgment.POOR -> { combo++; score += if (note.big) 100 else 50 }
             Judgment.MISS -> combo = 0

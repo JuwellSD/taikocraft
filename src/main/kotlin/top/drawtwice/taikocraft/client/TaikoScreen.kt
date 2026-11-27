@@ -3,281 +3,456 @@ package top.drawtwice.taikocraft.client
 import net.minecraft.client.gui.GuiGraphics
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.Component
+import top.drawtwice.taikocraft.chart.BarLine
+import top.drawtwice.taikocraft.chart.Note
 import top.drawtwice.taikocraft.chart.NoteColor
 import top.drawtwice.taikocraft.judge.Judgment
 import kotlin.math.abs
-import kotlin.math.sqrt
+import kotlin.math.max
+import kotlin.math.min
 
 /**
- * 游戏界面。
+ * 游戏界面 —— **完全按 OpenTaiko 皮肤包布局重做**。
  *
- * ## 尺寸（从坠尔实机截图实测）
- * 音符直径 3.33% 屏宽，4 拍跨度 53.3% 屏宽。
+ * ## 所有数值来源（不是自己编的）
+ * `OpenTaiko/System/Open-World Memories/GameConfig.ini`：
+ * ```
+ * Game_Lane_X=499,499      Game_Lane_Y=287,552
+ * Game_ScrollField_X=523   Game_ScrollField_Y=286
+ * Game_Notes_Size=195,195
+ * Game_Notes_Interval=960        <- 每 4 拍的像素数
+ * Game_Taiko_X=303         Game_Taiko_Y=324
+ * Game_Judge_X=554         Game_Judge_Y=234
+ * Game_Taiko_Combo_X=391   Game_Taiko_Combo_Y=406
+ * ```
  *
- * ## 打击圈
- * 判定位置画**与音符同大小的圆圈轮廓**，音符到达时正好覆盖它。
+ * ## 音符滚动公式（`NotesManager.getN4Beats` + `PxFromN4BeatsX`）
+ * ```
+ * n4Beats = Δms × bpm / 240000        (EScrollMode.Normal)
+ * x = n4Beats × Game_Notes_Interval × screenScale
+ * ```
+ *
+ * ## 慢音符不许「从中间冒出」
+ * 可见性不能用一个基于 `maxBpm` 的时间窗一刀切 —— 慢 BPM 的音符走得慢，
+ * 在同样的时间窗里它**已经进入屏幕**了，却被时间窗截掉不画，下一帧才出现在中间。
+ * 正确做法：时间窗按 **minBpm**（走得最慢的）算，再对每个音符单独判断是否已出屏。
+ *
+ * ## 左侧鼓的四个判定区
+ * OpenTaiko 的 `Don.png` / `Ka.png` 是**整张 180×200 的鼓面高亮图**：
+ * - `Don.png` 左半 → 左咚，右半 → 右咚
+ * - `Ka.png` 左半 → 左咔，右半 → 右咔
+ * 按 `nBrightness × 73` 作不透明度贴到鼓上，四个区域天然分开。
+ * 厚度由图片本身决定 —— **不再用代码画圈**，所以鼓边自然很细。
  */
 class TaikoScreen(
     private val session: PlaySession,
     private val previous: Screen? = null,
 ) : TaikoScreenBase(Component.literal("TaikoCraft")) {
 
-    private val donColor = 0xFFE8453C.toInt()
-    private val kaColor = 0xFF4FC3D9.toInt()
+    private var scale = 1f
+    private fun sx(v: Int) = (v * scale).toInt()
 
-    private var judgeX = 0
-    private var laneRight = 0
-    private var center1P = 0
-    private var center2P = 0
-    private var laneH = 0
-    private var noteR = 0
-    private var beatSpan = 0.0
+    private var noteOriginX = 0
+    private var noteOriginY1P = 0
+    private var noteOriginY2P = 0
+    private var noteSize = 0
+    private var interval = 1f
+    private var laneX = 0
+    private var laneY1P = 0
+    private var laneY2P = 0
     private var show2P = false
 
-    private val padFlash = DoubleArray(4)
-    private var lastRef: Any? = null
+    /** 谱面最慢 BPM（时间窗用它算，保证慢音符提前出现） */
+    private val minBpm: Double by lazy {
+        session.chart.notes.minOfOrNull { it.bpmAtNote } ?: session.chart.bpm
+    }
+
+    /** 四个判定区亮度 0..8（OpenTaiko `tMtaikoEvent` 置 8，每 20ms −1） */
+    private val padBrightness = IntArray(8)
+    private var flashTickNanos = 0L
+    private var lastFxResult: Any? = null
 
     override fun init() {
         super.init()
         session.start()
+        flashTickNanos = System.nanoTime()
     }
 
     override fun renderBackdrop(g: GuiGraphics) {
-        g.fill(0, 0, width, height, 0xFF101014.toInt())
+        g.fill(0, 0, width, height, 0xFF000000.toInt())
     }
 
     override fun renderContent(g: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
         session.tick()
         val now = session.renderTimeMs
+        val judgeNow = session.judgeTimeMs
         val notes = session.judge.notesSnapshot()
 
-        judgeX = (width * 0.26).toInt()
-        laneRight = width - (width * 0.05).toInt()
-        noteR = (width * 0.0333 / 2).toInt().coerceAtLeast(9)
-        beatSpan = width * 0.533
-        laneH = (height * 0.10).toInt().coerceAtLeast(30)
-        center1P = (height * 0.33).toInt()
-        center2P = (height * 0.50).toInt()
+        scale = TaikoGameLayout.scaleFor(width)
+        noteOriginX = sx(TaikoGameLayout.SCROLL_FIELD_X)
+        noteOriginY1P = sx(TaikoGameLayout.SCROLL_FIELD_Y)
+        noteOriginY2P = noteOriginY1P + sx(TaikoGameLayout.P2_DY)
+        noteSize = sx(TaikoGameLayout.NOTES_SIZE)
+        interval = TaikoGameLayout.NOTES_INTERVAL * scale
+        laneX = sx(TaikoGameLayout.LANE_X)
+        laneY1P = sx(TaikoGameLayout.LANE_Y)
+        laneY2P = sx(TaikoGameLayout.LANE_Y + TaikoGameLayout.P2_DY)
         show2P = notes.any { it.player == 2 }
 
-        drawLane(g, center1P)
-        if (show2P) drawLane(g, center2P)
+        tickPadBrightness()
 
-        // 小节线
-        for (bar in session.chart.barLines) {
-            val n4 = (bar.timeMs - now) * bar.bpmAtBar / 240000.0
-            val x = judgeX + (n4 * beatSpan).toInt()
-            if (x < judgeX || x > laneRight) continue
-            g.fill(x, center1P - laneH / 2, x + 1, center1P + laneH / 2, 0x40FFFFFF)
-            if (show2P) g.fill(x, center2P - laneH / 2, x + 1, center2P + laneH / 2, 0x40FFFFFF)
-        }
-
+        drawLanes(g)
+        drawBarLines(g, now)
         drawRolls(g, now)
         drawBalloons(g, now)
+        drawHitCircle(g, 1)
+        if (show2P) drawHitCircle(g, 2)
         drawNotes(g, now, notes)
-        drawLaneFlash(g)
-        updatePadFlash()
-        drawFlatTaiko(g)
-        drawFeedback(g)
-        drawInfo(g, now)
+        drawExplosions(g, judgeNow)
+        drawFlatDrum(g, 1)
+        if (show2P) drawFlatDrum(g, 2)
+        drawJudgeText(g, judgeNow)
+        drawComboAndScore(g)
+        drawDebug(g, now)
     }
 
-    private fun drawLane(g: GuiGraphics, cy: Int) {
-        g.fill(judgeX, cy - laneH / 2, laneRight, cy + laneH / 2, 0xE62B2E33.toInt())
-        g.fill(judgeX, cy - laneH / 2, laneRight, cy - laneH / 2 + 1, 0xFFB0B0B0.toInt())
-        g.fill(judgeX, cy + laneH / 2 - 1, laneRight, cy + laneH / 2, 0xFFB0B0B0.toInt())
+    // ================= 轨道 =================
+
+    private fun drawLanes(g: GuiGraphics) {
+        val w = sx(1422)
+        val h = sx(195)
+        TexDraw.full(g, TaikoGameTextures.laneMain, laneX, laneY1P, w, h, 1422, 195)
+        if (show2P) TexDraw.full(g, TaikoGameTextures.laneMain, laneX, laneY2P, w, h, 1422, 195)
+
+        val subW = sx(1421)
+        val subH = sx(39)
+        TexDraw.full(
+            g, TaikoGameTextures.laneSub, laneX,
+            sx(TaikoGameLayout.LANE_SUB_Y), subW, subH, 1421, 39,
+        )
+        if (show2P) TexDraw.full(
+            g, TaikoGameTextures.laneSub, laneX,
+            sx(TaikoGameLayout.LANE_SUB_Y + TaikoGameLayout.P2_DY), subW, subH, 1421, 39,
+        )
     }
 
-    private fun drawNotes(g: GuiGraphics, now: Double, notes: List<top.drawtwice.taikocraft.chart.Note>) {
-        // 打击圈（音符之前画，被覆盖即命中）
-        drawRing(g, judgeX, center1P, noteR + 2, 3, 0xC0FFFFFF.toInt())
-        if (show2P) drawRing(g, judgeX, center2P, noteR + 2, 3, 0xC0FFFFFF.toInt())
+    private fun drawBarLines(g: GuiGraphics, now: Double) {
+        val barW = max(1, sx(4))
+        for (bar in session.chart.barLines) {
+            for (player in 1..2) {
+                if (player == 2 && !show2P) continue
+                val mult = bpmMultOf(session.chart.barLines, bar)
+                val n4 = (bar.timeMs - now) * bar.bpmAtBar / 240000.0
+                @Suppress("UNUSED_VARIABLE") val unused = mult
+                val x = noteOriginX + (n4 * interval).toInt() + noteSize / 2 - barW / 2
+                if (x < laneX || x > width) continue
+                TexDraw.full(
+                    g, TaikoGameTextures.barLine, x,
+                    if (player == 1) noteOriginY1P else noteOriginY2P,
+                    barW, noteSize, 4, 270,
+                )
+            }
+        }
+    }
 
-        val maxN4 = (laneRight - judgeX) / beatSpan
-        val maxBpm = notes.maxOfOrNull { it.bpmAtNote } ?: 200.0
-        val ahead = 240000.0 * maxN4 / maxBpm
+    @Suppress("UNUSED_PARAMETER")
+    private fun bpmMultOf(list: List<BarLine>, bar: BarLine): Double = 1.0
 
-        var i = lowerBound(notes, now - 200.0)
+    // ================= 判定圈 =================
+
+    private fun drawHitCircle(g: GuiGraphics, player: Int) {
+        val y = if (player == 1) noteOriginY1P else noteOriginY2P
+        TexDraw.tinted(g, 1f, 1f, 1f, 0.55f) {
+            TexDraw.full(
+                g, TaikoGameTextures.hitCircle, noteOriginX, y,
+                noteSize, noteSize, 195, 195,
+            )
+        }
+    }
+
+    // ================= 音符 =================
+
+    private fun drawNotes(g: GuiGraphics, now: Double, notes: List<Note>) {
+        // 时间窗按最慢 BPM 算 → 慢音符不会被截掉
+        val maxN4 = if (interval <= 0f) 0.0 else (width - noteOriginX) / interval.toDouble()
+        val aheadMs = 240000.0 * maxN4 / minBpm.coerceAtLeast(1.0)
+
+        var i = lowerBound(notes, now - 250.0)
         while (i < notes.size) {
             val idx = i
             val n = notes[i]
-            if (n.timeMs > now + ahead) break
+            if (n.timeMs > now + aheadMs) break
             i++
             if (n.player == 2 && !show2P) continue
+            if (session.judge.isJudged(idx)) continue // 已打中：消失
+
             val d = n.timeMs - now
-            val x = judgeX + (d * n.bpmAtNote / 240000.0 * beatSpan).toInt()
-            if (x < judgeX - noteR * 2 || x > laneRight + noteR * 2) continue
-            val cy = if (n.player == 1) center1P else center2P
-            val alpha = if (session.judge.isJudged(idx)) 45 else 255
-            val r = if (n.big) noteR * 5 / 4 else noteR
-            val c = if (n.color == NoteColor.DON) donColor else kaColor
-            val a = alpha shl 24
-            drawDisc(g, x, cy, r, a or 0xFFFFFF, 1)
-            drawDisc(g, x, cy, (r - 4).coerceAtLeast(2), a or (c and 0xFFFFFF), 1)
-            if (n.big) drawDisc(g, x, cy, (r / 5).coerceAtLeast(2), a or 0xFFFFFF, 1)
+            val x = noteOriginX + (d * n.bpmAtNote / 240000.0 * interval).toInt()
+            // 每个音符单独判断是否还在屏幕内
+            if (x > width || x < noteOriginX - noteSize) continue
+
+            val y = if (n.player == 1) noteOriginY1P else noteOriginY2P
+            val col = when {
+                n.color == NoteColor.DON && n.big -> 2
+                n.color == NoteColor.KA && n.big -> 3
+                n.color == NoteColor.DON -> 0
+                else -> 1
+            }
+            TexDraw.sub(
+                g, TaikoGameTextures.notes, x, y, noteSize, noteSize,
+                col * 195, 0, 195, 195,
+                TaikoGameTextures.NOTES_COLS * 195, 195,
+            )
         }
     }
 
+    // ================= 连打 / 气球 =================
+
     private fun drawRolls(g: GuiGraphics, now: Double) {
         for (roll in session.chart.rolls) {
-            if (roll.endMs < now - 500) continue
-            val x1 = xOf(roll.startMs, now)
-            val x2 = xOf(roll.endMs, now)
-            drawBar(g, x1, x2, center1P, 0xFFB84040.toInt())
+            if (roll.endMs < now - 300) continue
+            if (roll.player == 2 && !show2P) continue
+            drawSegment(
+                g, now, roll.startMs, roll.endMs,
+                TaikoGameTextures.rolls, TaikoGameTextures.ROLLS_COLS,
+                if (roll.big) 1 else 0,
+                if (roll.player == 1) noteOriginY1P else noteOriginY2P,
+                bpmAt(roll.startMs),
+            )
         }
     }
 
     private fun drawBalloons(g: GuiGraphics, now: Double) {
         for (b in session.chart.balloons) {
-            if (b.endMs < now - 500) continue
-            val x1 = xOf(b.startMs, now)
-            val x2 = xOf(b.endMs, now)
-            drawBar(g, x1, x2, center1P, 0xFF5BA3C9.toInt())
-            val mid = (maxOf(x1, judgeX) + minOf(x2, laneRight)) / 2
+            if (b.endMs < now - 300) continue
+            if (b.player == 2 && !show2P) continue
+            val bpm = bpmAt(b.startMs)
+            drawSegment(
+                g, now, b.startMs, b.endMs,
+                TaikoGameTextures.balloons, TaikoGameTextures.BALLOON_COLS, 0,
+                if (b.player == 1) noteOriginY1P else noteOriginY2P,
+                bpm,
+            )
             val remain = (b.requiredHits - session.judge.balloonHitsOf(b)).coerceAtLeast(0)
-            drawDisc(g, mid, center1P, laneH / 2, 0xFFFFFFFF.toInt(), 1)
-            drawDisc(g, mid, center1P, laneH / 2 - 3, 0xFF5BA3C9.toInt(), 1)
-            g.drawCenteredString(font, remain.toString(), mid, center1P - 4, 0xFFFFFFFF.toInt())
-        }
-    }
-
-    private fun drawBar(g: GuiGraphics, x1: Int, x2: Int, cy: Int, color: Int) {
-        val l = minOf(x1, x2).coerceAtLeast(judgeX)
-        val r = maxOf(x1, x2).coerceAtMost(laneRight)
-        if (r <= l) return
-        val h = (noteR * 3 / 2).coerceAtLeast(8)
-        val top = cy - h / 2
-        g.fill(l, top - 2, r, top + h + 2, 0xFFFFFFFF.toInt())
-        g.fill(l, top, r, top + h, color)
-        drawDisc(g, l, cy, h / 2 + 2, 0xFFFFFFFF.toInt(), 1)
-        drawDisc(g, r, cy, h / 2 + 2, 0xFFFFFFFF.toInt(), 1)
-    }
-
-    private fun xOf(t: Double, now: Double): Int {
-        val notes = session.judge.notesSnapshot()
-        val bpm = if (notes.isEmpty()) session.chart.bpm
-        else notes[lowerBound(notes, t).coerceIn(0, notes.size - 1)].bpmAtNote
-        return judgeX + ((t - now) * bpm / 240000.0 * beatSpan).toInt()
-    }
-
-    private fun drawLaneFlash(g: GuiGraphics) {
-        val r = session.lastResult ?: return
-        val age = session.judgeTimeMs - session.lastResultAtMs
-        if (age < 0 || age > 100) return
-        val alpha = ((1 - age / 100.0) * 50).toInt().coerceIn(0, 55)
-        if (alpha <= 0) return
-        val c = if (r.color == NoteColor.DON) 0xE8453C else 0x4FC3D9
-        g.fill(judgeX, center1P - laneH / 2, laneRight, center1P + laneH / 2, (alpha shl 24) or c)
-        if (show2P) g.fill(judgeX, center2P - laneH / 2, laneRight, center2P + laneH / 2, (alpha shl 24) or c)
-    }
-
-    private fun updatePadFlash() {
-        for (i in padFlash.indices) if (padFlash[i] > 0) padFlash[i] -= 16.0
-        val r = session.lastResult ?: return
-        val age = session.judgeTimeMs - session.lastResultAtMs
-        if (age < 0 || age > 50) return
-        if (lastRef === r) return
-        lastRef = r
-        if (r.judgment == Judgment.MISS) return
-        if (r.color == NoteColor.DON) { padFlash[1] = 100.0; padFlash[2] = 100.0 }
-        else { padFlash[0] = 100.0; padFlash[3] = 100.0 }
-    }
-
-    private fun drawFlatTaiko(g: GuiGraphics) {
-        val cx = (judgeX / 2).coerceAtLeast(30)
-        val cy = center1P
-        val r = (noteR * 2).coerceIn(24, 64)
-        val inner = (r * 55 / 100).coerceAtLeast(10)
-        drawDisc(g, cx, cy, r, 0xFFE8E2DA.toInt(), 2)
-        drawDisc(g, cx, cy, inner, 0xFFC9BEB2.toInt(), 2)
-
-        for (i in padFlash.indices) {
-            val t = padFlash[i]
-            if (t <= 0) continue
-            val a = ((t / 100.0).coerceIn(0.0, 1.0) * 220).toInt() shl 24
-            when (i) {
-                0 -> drawHalf(g, cx, cy, inner, r, a or 0xFF4FC3D9.toInt(), true)
-                3 -> drawHalf(g, cx, cy, inner, r, a or 0xFF4FC3D9.toInt(), false)
-                1 -> drawHalf(g, cx, cy, 0, inner, a or 0xFFE8453C.toInt(), true)
-                2 -> drawHalf(g, cx, cy, 0, inner, a or 0xFFE8453C.toInt(), false)
+            val xm = noteOriginX + (((b.startMs + b.endMs) / 2 - now) * bpm / 240000.0 * interval).toInt()
+            if (xm in noteOriginX..width) {
+                val cy = (if (b.player == 1) noteOriginY1P else noteOriginY2P) + noteSize / 2
+                g.drawCenteredString(font, remain.toString(), xm, cy - 4, 0xFFFFFFFF.toInt())
             }
         }
     }
 
-    private fun drawHalf(g: GuiGraphics, cx: Int, cy: Int, inR: Int, outR: Int, color: Int, left: Boolean) {
-        if (outR <= 0) return
-        var dy = -outR
-        while (dy <= outR) {
-            val o = sqrt((outR.toDouble() * outR - dy * dy).coerceAtLeast(0.0)).toInt()
-            val i = if (inR > 0 && abs(dy) <= inR)
-                sqrt((inR.toDouble() * inR - dy * dy).coerceAtLeast(0.0)).toInt() else 0
-            if (left) g.fill(cx - o, cy + dy, cx - i, cy + dy + 2, color)
-            else g.fill(cx + i, cy + dy, cx + o + 1, cy + dy + 2, color)
-            dy += 2
+    /**
+     * 画「头 + 身 + 尾」。
+     *
+     * `rolls.png` / `balloons.png` 是每 3 列一组：`[头, 身, 尾]`，第 n 组起始列 = n×3。
+     */
+    private fun drawSegment(
+        g: GuiGraphics,
+        now: Double,
+        startMs: Double,
+        endMs: Double,
+        tex: net.minecraft.resources.ResourceLocation,
+        cols: Int,
+        group: Int,
+        y: Int,
+        bpm: Double,
+    ) {
+        val headX = noteOriginX + (((startMs - now) * bpm / 240000.0) * interval).toInt()
+        val tailX = noteOriginX + (((endMs - now) * bpm / 240000.0) * interval).toInt()
+        val headCol = group * 3
+        val bodyCol = headCol + 1
+        val tailCol = headCol + 2
+        val texW = cols * 195
+
+        // 身（先画，被头尾盖住两端）
+        val bodyLeft = max(headX + noteSize / 2, noteOriginX)
+        val bodyRight = min(tailX + noteSize / 2, width)
+        if (bodyRight > bodyLeft) {
+            TexDraw.sub(
+                g, tex, bodyLeft, y, bodyRight - bodyLeft, noteSize,
+                bodyCol * 195, 0, 195, 195, texW, 195,
+            )
+        }
+        // 头
+        if (headX > noteOriginX - noteSize && headX < width) {
+            TexDraw.sub(g, tex, headX, y, noteSize, noteSize, headCol * 195, 0, 195, 195, texW, 195)
+        }
+        // 尾
+        if (tailX > noteOriginX - noteSize && tailX < width) {
+            TexDraw.sub(g, tex, tailX, y, noteSize, noteSize, tailCol * 195, 0, 195, 195, texW, 195)
         }
     }
 
-    private fun drawFeedback(g: GuiGraphics) {
+    /** 取某个时刻的 BPM（沿用小节线记录的 BPM） */
+    private fun bpmAt(t: Double): Double {
+        val bars = session.chart.barLines
+        if (bars.isEmpty()) return session.chart.bpm
+        var lo = 0
+        var hi = bars.size - 1
+        var best = 0
+        while (lo <= hi) {
+            val m = (lo + hi) ushr 1
+            if (bars[m].timeMs <= t) { best = m; lo = m + 1 } else hi = m - 1
+        }
+        return bars[best].bpmAtBar
+    }
+
+    // ================= 打击特效 =================
+
+    private fun drawExplosions(g: GuiGraphics, judgeNow: Double) {
+        for (fx in session.hitFx) {
+            val age = judgeNow - fx.startMs
+            if (age < 0 || age > 180) continue
+            val t = (age / 180.0).coerceIn(0.0, 1.0)
+            val size = (noteSize * (1.0 + t * 0.7)).toInt()
+            val alpha = ((1.0 - t) * 0.9).toFloat()
+            val cy = if (fx.player == 1) noteOriginY1P else noteOriginY2P
+            val x = noteOriginX + noteSize / 2 - size / 2
+            val y = cy + noteSize / 2 - size / 2
+            TexDraw.tinted(g, 1f, 1f, 1f, alpha) {
+                TexDraw.full(
+                    g,
+                    if (fx.big) TaikoGameTextures.explosionBig else TaikoGameTextures.explosion,
+                    x, y, size, size, 195, 195,
+                )
+            }
+        }
+    }
+
+    // ================= 左侧平面太鼓（四个判定区）=================
+
+    /**
+     * OpenTaiko `CActImplMtaiko.Draw()` 顺序：
+     * 1. `Base.png` 打底（鼓身）
+     * 2. `Ka.png` 左半 / 右半（鼓边 = 外圈）
+     * 3. `Don.png` 左半 / 右半（鼓面 = 内圈）
+     *
+     * 不透明度 = `brightness × 73 / 255`，brightness 每次击打置 8、每 20ms −1。
+     * 图片本身决定鼓边粗细 —— 所以是原版的细边。
+     */
+    private fun drawFlatDrum(g: GuiGraphics, player: Int) {
+        val ox = sx(TaikoGameLayout.TAIKO_X)
+        val oy = sx(TaikoGameLayout.TAIKO_Y + TaikoGameLayout.playerYOffset(player))
+        val w = sx(180)
+        val h = sx(200)
+        val base = (player - 1) * 4
+
+        TexDraw.full(g, TaikoGameTextures.drumBase, ox, oy, w, h, 180, 200)
+
+        val half = w / 2
+        // 鼓边（Ka）：0 左、1 右
+        for (i in 0..1) {
+            val b = padBrightness[base + i]
+            if (b <= 0) continue
+            val a = min(1f, b * 73 / 255f)
+            TexDraw.tinted(g, 1f, 1f, 1f, a) {
+                TexDraw.sub(
+                    g, TaikoGameTextures.drumKa, ox + i * half, oy, half, h,
+                    i * 90, 0, 90, 200, 180, 200,
+                )
+            }
+        }
+        // 鼓面（Don）：2 左、3 右
+        for (i in 0..1) {
+            val b = padBrightness[base + 2 + i]
+            if (b <= 0) continue
+            val a = min(1f, b * 73 / 255f)
+            TexDraw.tinted(g, 1f, 1f, 1f, a) {
+                TexDraw.sub(
+                    g, TaikoGameTextures.drumDon, ox + i * half, oy, half, h,
+                    i * 90, 0, 90, 200, 180, 200,
+                )
+            }
+        }
+    }
+
+    private fun tickPadBrightness() {
+        val now = System.nanoTime()
+        if (flashTickNanos == 0L) flashTickNanos = now
+        while (now - flashTickNanos >= 20_000_000L) {
+            for (i in padBrightness.indices) if (padBrightness[i] > 0) padBrightness[i]--
+            flashTickNanos += 20_000_000L
+        }
         val r = session.lastResult ?: return
-        val age = session.judgeTimeMs - session.lastResultAtMs
-        if (age < 0 || age > 600) return
+        if (lastFxResult === r) return
+        lastFxResult = r
+        if (r.judgment == Judgment.MISS) return
+        val b = (r.player - 1).coerceIn(0, 1) * 4
+        val left = r.side == top.drawtwice.taikocraft.judge.Side.LEFT
+        if (r.color == NoteColor.DON) {
+            if (r.big) { padBrightness[b + 2] = 8; padBrightness[b + 3] = 8 }
+            else padBrightness[b + if (left) 2 else 3] = 8
+        } else {
+            if (r.big) { padBrightness[b] = 8; padBrightness[b + 1] = 8 }
+            else padBrightness[b + if (left) 0 else 1] = 8
+        }
+    }
+
+    // ================= 判定文字 / 调试 =================
+
+    private fun drawJudgeText(g: GuiGraphics, judgeNow: Double) {
+        val r = session.lastResult ?: return
+        val age = judgeNow - session.lastResultAtMs
+        if (age < 0 || age > 700) return
         val text = when (r.judgment) {
-            Judgment.PERFECT -> "良"; Judgment.GOOD -> "可"
-            Judgment.POOR -> "不可"; Judgment.MISS -> "不可"
+            Judgment.PERFECT -> "良"
+            Judgment.GOOD -> "可"
+            Judgment.POOR -> "不可"
+            Judgment.MISS -> "不可"
         }
         val c = when (r.judgment) {
-            Judgment.PERFECT -> 0xFFFFD24A.toInt(); Judgment.GOOD -> 0xFFFFFFFF.toInt()
-            Judgment.POOR -> 0xFFAAAAAA.toInt(); Judgment.MISS -> 0xFFFF5555.toInt()
+            Judgment.PERFECT -> 0xFFFFD24A.toInt()
+            Judgment.GOOD -> 0xFFFFFFFF.toInt()
+            Judgment.POOR -> 0xFFAAAAAA.toInt()
+            Judgment.MISS -> 0xFFFF5555.toInt()
         }
-        val fx = judgeX + noteR * 3
-        g.drawString(font, text, fx, center1P - noteR - 4, c)
+        val fade = if (age > 500) ((700 - age) / 200.0).toFloat() else 1f
+        val x = sx(TaikoGameLayout.JUDGE_X)
+        val y = sx(TaikoGameLayout.JUDGE_Y)
+        TexDraw.tinted(g, 1f, 1f, 1f, fade.coerceIn(0f, 1f)) {
+            g.drawString(font, text, x, y, c)
+        }
+
+        // 调试：早/晚多少 ms（坠尔要求保留）
         val nt = r.noteTimeMs ?: return
         val off = session.lastResultAtMs - nt
         if (abs(off) > 400) return
         val sign = if (off >= 0) "+" else "−"
+        val col = if (abs(off) <= 25) 0xFFFFD24A.toInt() else 0xFF999999.toInt()
+        g.drawString(font, "$sign${"%.1f".format(abs(off))}ms", x, y + 14, col)
+    }
+
+    private fun drawComboAndScore(g: GuiGraphics) {
+        val combo = session.judge.currentCombo
+        if (combo > 0) {
+            g.drawString(
+                font, combo.toString(),
+                sx(TaikoGameLayout.COMBO_X), sx(TaikoGameLayout.COMBO_Y),
+                0xFFFFD24A.toInt(),
+            )
+        }
         g.drawString(
-            font, "$sign${"%.1f".format(abs(off))}ms", fx, center1P - noteR + 8,
-            if (abs(off) <= 25) 0xFFFFD24A.toInt() else 0xFF999999.toInt(),
+            font, session.judge.currentScore.toString(),
+            sx(TaikoGameLayout.SCORE_X), sx(TaikoGameLayout.SCORE_Y),
+            0xFFFFFFFF.toInt(),
         )
     }
 
-    private fun drawInfo(g: GuiGraphics, now: Double) {
+    /** 调试信息（坠尔要求保留） */
+    private fun drawDebug(g: GuiGraphics, now: Double) {
         var y = 4
-        g.drawString(font, "谱面 ${"%.0f".format(now)}ms", 4, y, 0xFFCCCCCC.toInt()); y += 10
-        g.drawString(font, "音频 ${"%.0f".format(session.clock.songPositionMs)}ms", 4, y, 0xFFCCCCCC.toInt()); y += 10
-        g.drawString(font, "目 ${session.clock.visualOffsetMs.toInt()} 音 ${session.clock.audioOffsetMs.toInt()}", 4, y, 0xFF888888.toInt()); y += 12
-        g.drawString(font, "分 ${session.judge.currentScore}", 4, y, 0xFFFFD24A.toInt()); y += 11
-        g.drawString(font, "连 ${session.judge.currentCombo}", 4, y, 0xFF7FE87F.toInt())
+        g.drawString(font, "谱面 ${"%.0f".format(now)}ms", 4, y, 0xFF88FF88.toInt()); y += 10
+        g.drawString(font, "音频 ${"%.0f".format(session.clock.songPositionMs)}ms", 4, y, 0xFF88FF88.toInt()); y += 10
+        g.drawString(font, "目 ${session.clock.visualOffsetMs.toInt()} 音 ${session.clock.audioOffsetMs.toInt()}", 4, y, 0xFF888888.toInt()); y += 10
+        g.drawString(font, "分数 ${session.judge.currentScore}  连击 ${session.judge.currentCombo}", 4, y, 0xFFFFD24A.toInt()); y += 10
+        val st = session.audioStatus
+        if (st.isNotEmpty()) g.drawString(font, st, 4, y, 0xFFFF6666.toInt())
     }
 
-    private fun drawDisc(g: GuiGraphics, cx: Int, cy: Int, r: Int, color: Int, step: Int) {
-        if (r <= 0) return
-        val r2 = r.toLong() * r
-        var dy = -r
-        while (dy <= r) {
-            val half = sqrt((r2 - dy.toLong() * dy).toDouble()).toInt()
-            g.fill(cx - half, cy + dy, cx + half + 1, cy + dy + step, color)
-            dy += step
-        }
-    }
-
-    private fun drawRing(g: GuiGraphics, cx: Int, cy: Int, r: Int, th: Int, color: Int) {
-        if (r <= 0) return
-        val o2 = r.toLong() * r
-        val inR = (r - th).coerceAtLeast(1)
-        val i2 = inR.toLong() * inR
-        var dy = -r
-        while (dy <= r) {
-            val o = sqrt((o2 - dy.toLong() * dy).toDouble()).toInt()
-            val i = if (abs(dy) <= inR) sqrt((i2 - dy.toLong() * dy).toDouble()).toInt() else 0
-            g.fill(cx - o, cy + dy, cx - i, cy + dy + 2, color)
-            g.fill(cx + i, cy + dy, cx + o + 1, cy + dy + 2, color)
-            dy += 2
-        }
-    }
-
-    private fun lowerBound(notes: List<top.drawtwice.taikocraft.chart.Note>, t: Double): Int {
-        var lo = 0; var hi = notes.size
+    private fun lowerBound(notes: List<Note>, t: Double): Int {
+        var lo = 0
+        var hi = notes.size
         while (lo < hi) {
             val m = (lo + hi) ushr 1
             if (notes[m].timeMs < t) lo = m + 1 else hi = m

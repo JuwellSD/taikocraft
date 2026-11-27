@@ -103,12 +103,21 @@ class SongSelectScreen(
 
         // ---- 底部提示 ----
         val hintY = height - 40
-        g.drawString(font, "↑↓ 选择    Enter 开始    ESC 返回", 20, hintY, 0xFF888888.toInt())
+        g.drawString(
+            font, "↑↓ 选择    Enter 开始    C 延迟校准    ESC 返回",
+            20, hintY, 0xFF888888.toInt(),
+        )
         if (songs.isNotEmpty()) {
             g.drawString(font, "${selected + 1} / ${songs.size}", 20, hintY - 20, 0xFFAAAAAA.toInt())
         }
+        // 当前延迟（坠尔要求：一眼能看见现在是多少）
+        g.drawString(
+            font,
+            "目押 ${TaikoCraftClient.visualOffsetMs.toInt()} ms    音押 ${TaikoCraftClient.audioOffsetMs.toInt()} ms",
+            20, hintY - 40, 0xFF7FE87F.toInt(),
+        )
         if (status.isNotEmpty()) {
-            g.drawString(font, status, 20, hintY - 40, 0xFFFF6666.toInt())
+            g.drawString(font, status, 20, hintY - 60, 0xFFFF6666.toInt())
         }
     }
 
@@ -117,6 +126,10 @@ class SongSelectScreen(
             265 -> { if (selected > 0) selected--; return true }              // UP
             264 -> { if (selected < songs.size - 1) selected++; return true } // DOWN
             257, 335 -> { startSelected(); return true }                       // ENTER
+            67 -> {                                                            // C：延迟校准
+                minecraft?.setScreen(CalibrationScreen(this))
+                return true
+            }
             256 -> { minecraft?.setScreen(previous); return true }             // ESC
         }
         return super.keyPressed(keyCode, scanCode, modifiers)

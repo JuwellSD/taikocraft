@@ -21,6 +21,10 @@ data class JudgeResult(
     val fromRollOrBalloon: Boolean = false,
     val balloonHits: Int? = null,
     val balloonRequired: Int? = null,
+    /** 打击落在哪一侧（供平面太鼓高亮） */
+    val side: Side = Side.LEFT,
+    /** 第几玩家（供平面太鼓高亮） */
+    val player: Int = 1,
 )
 
 /**
