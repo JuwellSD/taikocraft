@@ -76,11 +76,10 @@ object NoteSkinManager {
             val ok = runCatching {
                 g.blit(
                     ORIGINAL_NOTES,
-                    (cx - r).toFloat(), (cy - r).toFloat(),
-                    size.toFloat(), size.toFloat(),
+                    cx - r, cy - r,
+                    size, size,
                     frame * NOTES_FRAME_W, 0,
                     NOTES_FRAME_W, NOTES_FRAME_H,
-                    NOTES_FRAME_W * NOTES_FRAMES, NOTES_FRAME_H,
                 )
                 true
             }.getOrDefault(false)
