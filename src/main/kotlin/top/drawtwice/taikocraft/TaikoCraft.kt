@@ -8,17 +8,14 @@ import org.slf4j.LoggerFactory
 /**
  * TaikoCraft —— 在 Minecraft 里开一家太鼓机厅。
  *
- * 主入口（**双端共用**，不含任何客户端类引用）。
- * 客户端逻辑在 [top.drawtwice.taikocraft.client.TaikoCraftClient]，
- * 它单独带 `@Mod(dist = [Dist.CLIENT])`，专用服务器不会加载。
+ * ## 架构说明（2026-11-28 重写）
+ * 界面的布局、坐标、配色**全部来自 OpenTaiko**（`song_select_core/Config/layout.json`），
+ * 不自己发明数值。
  *
- * ## 事件注册（踩坑记录）
- * KotlinForForge 的 `@EventBusSubscriber` + `object` 自动注册有个坑：
- * KFF **不读 `bus` 属性**，而是按事件类型自动判断，然后整体 `register(obj)`；
- * 此时**方法绝对不能加 `@JvmStatic`**，否则抛
- * "Expected @SubscribeEvent method ... to NOT be static"。
- *
- * 本项目改为**显式注册**（构造器注入 IEventBus = MOD 总线），更可控。
+ * ## 事件注册
+ * 使用**显式注册**（构造器注入 IEventBus = MOD 总线）。
+ * 不使用 `@EventBusSubscriber` 自动扫描 —— KFF 不读 bus 属性，
+ * 且混用 MOD/GAME 事件时会因为方法可见性报错。
  */
 @Mod(TaikoCraft.MOD_ID)
 class TaikoCraft(modEventBus: IEventBus) {
@@ -31,9 +28,6 @@ class TaikoCraft(modEventBus: IEventBus) {
     }
 
     init {
-        LOGGER.info("TaikoCraft 加载中……（Phase 1）")
-        // 这里只放双端通用的事件注册；客户端专属注册见 TaikoCraftClient
-        @Suppress("UNUSED_EXPRESSION")
-        modEventBus
+        LOGGER.info("TaikoCraft 加载中（OpenTaiko 界面复刻版）")
     }
 }
