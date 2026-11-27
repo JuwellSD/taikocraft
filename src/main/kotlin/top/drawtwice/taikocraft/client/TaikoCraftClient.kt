@@ -13,7 +13,7 @@ import com.mojang.blaze3d.platform.InputConstants
 import org.lwjgl.glfw.GLFW
 import top.drawtwice.taikocraft.TaikoCraft
 import top.drawtwice.taikocraft.chart.SongLibrary
-import top.drawtwice.taikocraft.client.input.KeyMapping
+import top.drawtwice.taikocraft.client.input.TaikoKeys
 import top.drawtwice.taikocraft.client.input.TaikoKeyConfig
 import java.nio.file.Files
 import java.util.Properties
@@ -57,7 +57,7 @@ class TaikoCraftClient(modEventBus: IEventBus) {
                 audioOffsetMs = p.getProperty("audioOffsetMs")?.toDoubleOrNull() ?: 0.0
                 TaikoKeyConfig.scheme = top.drawtwice.taikocraft.client.input.KeyScheme
                     .fromName(p.getProperty("keyScheme"))
-                TaikoKeyConfig.mapping = top.drawtwice.taikocraft.client.input.KeyMapping(
+                TaikoKeyConfig.mapping = TaikoKeys(
                     p.getProperty("key.leftDon")?.toIntOrNull() ?: 70,
                     p.getProperty("key.leftKa")?.toIntOrNull() ?: 68,
                     p.getProperty("key.rightDon")?.toIntOrNull() ?: 74,

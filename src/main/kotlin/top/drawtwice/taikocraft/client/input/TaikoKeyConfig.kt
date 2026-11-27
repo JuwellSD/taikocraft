@@ -1,7 +1,6 @@
 package top.drawtwice.taikocraft.client.input
 
 import com.mojang.blaze3d.platform.InputConstants
-import net.minecraft.client.KeyMapping
 import org.lwjgl.glfw.GLFW
 import top.drawtwice.taikocraft.chart.NoteColor
 import top.drawtwice.taikocraft.judge.Side
@@ -21,7 +20,7 @@ enum class KeyScheme(val displayName: String) {
     }
 }
 
-data class KeyMapping(
+data class TaikoKeys(
     val leftDon: Int, val leftKa: Int, val rightDon: Int, val rightKa: Int,
 ) {
     fun toColorSide(key: Int): Pair<NoteColor, Side>? = when (key) {
@@ -40,10 +39,10 @@ data class KeyMapping(
         private const val K = 75
         private const val R = 82
 
-        fun of(scheme: KeyScheme): KeyMapping = when (scheme) {
-            KeyScheme.BEGINNER -> KeyMapping(leftDon = F, leftKa = D, rightDon = J, rightKa = K)
-            KeyScheme.EXPERT -> KeyMapping(leftDon = F, leftKa = R, rightDon = J, rightKa = I)
-            KeyScheme.CUSTOM -> KeyMapping(leftDon = F, leftKa = D, rightDon = J, rightKa = K)
+        fun of(scheme: KeyScheme): TaikoKeys = when (scheme) {
+            KeyScheme.BEGINNER -> TaikoKeys(leftDon = F, leftKa = D, rightDon = J, rightKa = K)
+            KeyScheme.EXPERT -> TaikoKeys(leftDon = F, leftKa = R, rightDon = J, rightKa = I)
+            KeyScheme.CUSTOM -> TaikoKeys(leftDon = F, leftKa = D, rightDon = J, rightKa = K)
         }
 
         fun keyName(glfwKey: Int): String =
@@ -54,10 +53,10 @@ data class KeyMapping(
 /** 运行时键位（由设置修改） */
 object TaikoKeyConfig {
     var scheme: KeyScheme = KeyScheme.BEGINNER
-    var mapping: KeyMapping = KeyMapping.of(KeyScheme.BEGINNER)
+    var mapping: TaikoKeys = TaikoKeys.of(KeyScheme.BEGINNER)
 
     fun apply(scheme: KeyScheme) {
         this.scheme = scheme
-        mapping = KeyMapping.of(scheme)
+        mapping = TaikoKeys.of(scheme)
     }
 }
