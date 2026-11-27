@@ -36,6 +36,10 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
     /** Autoplay 开关（仅 OP 可用） */
     private var autoPlayEnabled = false
 
+    /** 行2 标签的 x 坐标（由 init 计算，renderContent 使用） */
+    private var visualLabelX = 0
+    private var audioLabelX = 0
+
     override fun init() {
         songs = runCatching { library.listSongs() }
             .onFailure { statusMessage = "扫描曲库失败：${it.message}" }
@@ -77,36 +81,49 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
             }.bounds(248, row1, 80, btnH).build(),
         )
 
-        // ---- 行2：延迟输入（标签画在 renderContent 里）----
-        visualBox = EditBox(font, width - 236, row2, 46, 18, Component.literal("目押")).apply {
+        // ---- 行2：延迟输入 ----
+        // 布局（从右往左数，单位 px）：
+        //   [目押标签 32][输入框 46][-5 30][+5 30] [间距 12] [音押标签 32][输入框 46][-5 30][+5 30]
+        // 总宽 = 32+46+30+30 + 12 + 32+46+30+30 = 288
+        val row2W = 288
+        val row2X = width - row2W - 8
+        var cx = row2X
+        visualLabelX = cx; cx += 32
+        visualBox = EditBox(font, cx, row2, 46, 18, Component.literal("目押")).apply {
             setMaxLength(6)
             setValue(TaikoCraftClient.visualOffsetMs.toInt().toString())
             setResponder { txt -> txt.toDoubleOrNull()?.let { applyOffsets(visual = it) } }
         }
-        audioBox = EditBox(font, width - 128, row2, 46, 18, Component.literal("音押")).apply {
+        cx += 46
+        addRenderableWidget(Button.builder(Component.literal("-5")) {
+            applyOffsets(visual = TaikoCraftClient.visualOffsetMs - 5)
+            visualBox?.setValue(TaikoCraftClient.visualOffsetMs.toInt().toString())
+        }.bounds(cx, row2, 30, 18).build())
+        cx += 30
+        addRenderableWidget(Button.builder(Component.literal("+5")) {
+            applyOffsets(visual = TaikoCraftClient.visualOffsetMs + 5)
+            visualBox?.setValue(TaikoCraftClient.visualOffsetMs.toInt().toString())
+        }.bounds(cx, row2, 30, 18).build())
+        cx += 30 + 12
+        audioLabelX = cx; cx += 32
+        audioBox = EditBox(font, cx, row2, 46, 18, Component.literal("音押")).apply {
             setMaxLength(6)
             setValue(TaikoCraftClient.audioOffsetMs.toInt().toString())
             setResponder { txt -> txt.toDoubleOrNull()?.let { applyOffsets(audio = it) } }
         }
-        visualBox?.let { addRenderableWidget(it) }
-        audioBox?.let { addRenderableWidget(it) }
-
-        addRenderableWidget(Button.builder(Component.literal("-5")) {
-            applyOffsets(visual = TaikoCraftClient.visualOffsetMs - 5)
-            visualBox?.setValue(TaikoCraftClient.visualOffsetMs.toInt().toString())
-        }.bounds(width - 188, row2, 34, 18).build())
-        addRenderableWidget(Button.builder(Component.literal("+5")) {
-            applyOffsets(visual = TaikoCraftClient.visualOffsetMs + 5)
-            visualBox?.setValue(TaikoCraftClient.visualOffsetMs.toInt().toString())
-        }.bounds(width - 152, row2, 34, 18).build())
+        cx += 46
         addRenderableWidget(Button.builder(Component.literal("-5")) {
             applyOffsets(audio = TaikoCraftClient.audioOffsetMs - 5)
             audioBox?.setValue(TaikoCraftClient.audioOffsetMs.toInt().toString())
-        }.bounds(width - 80, row2, 34, 18).build())
+        }.bounds(cx, row2, 30, 18).build())
+        cx += 30
         addRenderableWidget(Button.builder(Component.literal("+5")) {
             applyOffsets(audio = TaikoCraftClient.audioOffsetMs + 5)
             audioBox?.setValue(TaikoCraftClient.audioOffsetMs.toInt().toString())
-        }.bounds(width - 44, row2, 34, 18).build())
+        }.bounds(cx, row2, 30, 18).build())
+
+        visualBox?.let { addRenderableWidget(it) }
+        audioBox?.let { addRenderableWidget(it) }
 
         // ---- 行3：功能入口，等宽排开 ----
         val entries = listOf<Pair<String, () -> Unit>>(
@@ -179,11 +196,10 @@ class SongSelectScreen(private val previous: Screen? = null) : TaikoScreenBase(C
             }
         }
 
-        // 延迟输入标签（与 init 里的行2 对齐）
+        // 延迟输入标签（坐标由 init 计算，保证不重叠）
         val row2 = height - 72
-        guiGraphics.drawString(font, "目押", width - 272, row2 + 5, 0xFFAAAAAA.toInt())
-        guiGraphics.drawString(font, "音押", width - 164, row2 + 5, 0xFFAAAAAA.toInt())
-        guiGraphics.drawString(font, "ms", width - 4, row2 + 5, 0xFF666666.toInt())
+        guiGraphics.drawString(font, "目押", visualLabelX, row2 + 5, 0xFFAAAAAA.toInt())
+        guiGraphics.drawString(font, "音押", audioLabelX, row2 + 5, 0xFFAAAAAA.toInt())
 
         if (statusMessage.isNotBlank()) {
             guiGraphics.drawString(font, statusMessage, 10, height - 50, 0xFFFF7777.toInt())

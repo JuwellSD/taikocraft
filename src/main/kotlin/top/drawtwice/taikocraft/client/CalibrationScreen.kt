@@ -5,123 +5,122 @@ import net.minecraft.client.gui.components.Button
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.Component
 import top.drawtwice.taikocraft.audio.MetronomeSound
+import top.drawtwice.taikocraft.chart.NoteColor
 import top.drawtwice.taikocraft.client.input.KeyInputBuffer
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 /**
- * 延迟校准（**双通道分离**，坠尔的设计要求）。
+ * 延迟校准界面。
  *
- * ## 为什么要分开
- * 纯视觉校准不是音游。显示器和声卡的延迟是不同的两回事：
+ * ## 两种校准模式（坠尔要求）
+ * | 模式 | 说明 |
+ * |---|---|
+ * | **太鼓音符闪烁** | 屏幕中央闪烁太鼓音符，跟着敲。间隔 1200ms（给高延迟设备留足余地） |
+ * | **无尽小关卡** | 简单谱面持续下落，看到音符到判定线时敲，更像真实游玩 |
  *
- * | 模式 | 玩家凭据 | 调的是 | 影响 |
- * |---|---|---|---|
- * | **目押（视觉）** | 看着节拍**图形**按 | `visualOffsetMs` | 只改音符画在哪 |
- * | **音押（听觉）** | 闭眼**听**节拍按 | `audioOffsetMs` | 只改判定时刻 |
+ * ## 两种偏移（沿用药丸设计）
+ * - **目押**：只影响视觉，判定不变
+ * - **音押**：视觉与判定一起平移
  *
- * 两种模式各采 16 个样本取中位数。可以只调一个，也可以都调。
- *
- * 注意：本界面用**系统时钟**产生节拍并采样的，采样结果是「人的反应延迟 + 显示/音频管线延迟」，
- * 不需要真的播放音频也能测目押；音押模式建议玩家戴耳机闭眼跟着内心的节拍按——
- * 实际使用中更精确的做法是进入游戏后按实际音乐微调，本界面提供的是快速起点。
+ * ## 采样规则
+ * - 只认游戏内设置的四键（由 Mixin 保证，其它键不会进缓冲）
+ * - **无采样上限**（坠尔要求，方便精细调整）
+ * - 接受节拍前后 ±600ms 的偏差（环绕计算）
  */
 class CalibrationScreen(
     private val previous: Screen? = null,
     private val onApplied: () -> Unit = {},
 ) : TaikoScreenBase(Component.literal("延迟校准")) {
 
-    private enum class Mode(val label: String, val hint: String) {
-        VISUAL("目押（看图形）", "看着蓝色方块，它出现的瞬间按"),
-        AUDIO("音押（听声音）", "闭上眼睛，凭感觉跟节拍按"),
+    private enum class Mode(val label: String) {
+        PULSE("太鼓音符闪烁"),
+        MINI_CHART("无尽小关卡"),
     }
 
-    private var mode = Mode.VISUAL
+    /** 校准的是哪个偏移 */
+    private enum class Target(val label: String) {
+        VISUAL("目押（只改视觉）"),
+        AUDIO("音押（视觉+判定）"),
+    }
 
-    private val beatIntervalMs = 600.0
-    private val maxSamples = 16
+    private var mode = Mode.PULSE
+    private var target = Target.AUDIO
 
-    private val visualSamples = mutableListOf<Double>()
-    private val audioSamples = mutableListOf<Double>()
+    /** 节拍间隔：1200ms（原 600ms 对高延迟设备太短） */
+    private val beatIntervalMs = 1200.0
+
+    private val samples = mutableListOf<Double>()
 
     private var startNanos = 0L
     private var lastBeatIndex = -1
     private var lastPulseAtMs = 0.0
 
-    private var recommendedVisual = 0.0
-    private var recommendedAudio = 0.0
-
     private var currentVisual = 0.0
     private var currentAudio = 0.0
 
-    private fun samples() = if (mode == Mode.VISUAL) visualSamples else audioSamples
-    private fun recommended() = if (mode == Mode.VISUAL) recommendedVisual else recommendedAudio
+    // 小关卡模式：模拟音符
+    private data class MiniNote(val timeMs: Double, val color: NoteColor)
+    private var miniNotes: List<MiniNote> = emptyList()
 
     override fun init() {
         startNanos = System.nanoTime()
-        visualSamples.clear()
-        audioSamples.clear()
         lastBeatIndex = -1
         lastPulseAtMs = 0.0
         currentVisual = TaikoCraftClient.visualOffsetMs
         currentAudio = TaikoCraftClient.audioOffsetMs
         MetronomeSound.init()
-        MetronomeSound.setVolume(1.0f)
+        MetronomeSound.setVolume(1f)
+
+        // 小关卡：每 1200ms 一个音符，交替红蓝，无限延伸
+        miniNotes = (0 until 120).map { i ->
+            MiniNote(i * beatIntervalMs, if (i % 2 == 0) NoteColor.DON else NoteColor.KA)
+        }
 
         val cx = width / 2
-        val by = height - 30
+        // 模式切换
+        addRenderableWidget(Button.builder(Component.literal("模式：${mode.label}")) { btn ->
+            mode = if (mode == Mode.PULSE) Mode.MINI_CHART else Mode.PULSE
+            btn.message = Component.literal("模式：${mode.label}")
+            resetSampling()
+        }.bounds(cx - 230, 30, 140, 20).build())
 
-        addRenderableWidget(
-            Button.builder(Component.literal(Mode.VISUAL.label)) {
-                mode = Mode.VISUAL
-                resetBeat()
-            }.bounds(cx - 210, 40, 130, 20).build(),
-        )
-        addRenderableWidget(
-            Button.builder(Component.literal(Mode.AUDIO.label)) {
-                mode = Mode.AUDIO
-                resetBeat()
-            }.bounds(cx - 70, 40, 130, 20).build(),
-        )
-        addRenderableWidget(
-            Button.builder(Component.literal("清零当前采样")) {
-                samples().clear()
-                if (mode == Mode.VISUAL) recommendedVisual = 0.0 else recommendedAudio = 0.0
-                resetBeat()
-            }.bounds(cx + 70, 40, 130, 20).build(),
-        )
+        // 目标偏移切换
+        addRenderableWidget(Button.builder(Component.literal("校准：${target.label}")) { btn ->
+            target = if (target == Target.VISUAL) Target.AUDIO else Target.VISUAL
+            btn.message = Component.literal("校准：${target.label}")
+        }.bounds(cx - 80, 30, 150, 20).build())
 
-        addRenderableWidget(
-            Button.builder(Component.literal("应用")) {
-                val v = if (visualSamples.size >= 5) recommendedVisual else currentVisual
-                val a = if (audioSamples.size >= 5) recommendedAudio else currentAudio
-                TaikoCraftClient.setOffsets(v, a)
-                onApplied()
-                minecraft?.setScreen(previous)
-            }.bounds(cx - 160, by, 90, 20).build(),
-        )
-        addRenderableWidget(
-            Button.builder(Component.literal("全部清零")) {
-                TaikoCraftClient.setOffsets(0.0, 0.0)
-                currentVisual = 0.0
-                currentAudio = 0.0
-                visualSamples.clear()
-                audioSamples.clear()
-                recommendedVisual = 0.0
-                recommendedAudio = 0.0
-            }.bounds(cx - 60, by, 90, 20).build(),
-        )
-        addRenderableWidget(
-            Button.builder(Component.literal("返回")) {
-                minecraft?.setScreen(previous)
-            }.bounds(cx + 40, by, 90, 20).build(),
-        )
+        addRenderableWidget(Button.builder(Component.literal("清零采样")) {
+            resetSampling()
+        }.bounds(cx + 80, 30, 90, 20).build())
+
+        addRenderableWidget(Button.builder(Component.literal("应用推荐值")) {
+            applyRecommended()
+            onApplied()
+            minecraft?.setScreen(previous)
+        }.bounds(cx - 160, height - 34, 110, 20).build())
+
+        addRenderableWidget(Button.builder(Component.literal("返回")) {
+            minecraft?.setScreen(previous)
+        }.bounds(cx + 20, height - 34, 80, 20).build())
     }
 
-    private fun resetBeat() {
+    private fun resetSampling() {
+        samples.clear()
         startNanos = System.nanoTime()
         lastBeatIndex = -1
         lastPulseAtMs = 0.0
+    }
+
+    private fun applyRecommended() {
+        if (samples.isEmpty()) return
+        val median = -samples.sorted()[samples.size / 2]
+        when (target) {
+            Target.VISUAL -> TaikoCraftClient.setOffsets(median, TaikoCraftClient.audioOffsetMs)
+            Target.AUDIO -> TaikoCraftClient.setOffsets(TaikoCraftClient.visualOffsetMs, median)
+        }
     }
 
     override fun renderContent(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
@@ -130,89 +129,142 @@ class CalibrationScreen(
         if (beatIndex != lastBeatIndex) {
             lastBeatIndex = beatIndex
             lastPulseAtMs = beatIndex * beatIntervalMs
-            // ★ 播放节拍音（音押校准的关键）
-            MetronomeSound.play(accent = (beatIndex % 4 == 0))
-        }
-        val sincePulse = nowMs - lastPulseAtMs
-
-        // 节拍视觉提示（目押用方块，音押只做微弱提示）
-        val pulseAlpha = when {
-            sincePulse !in 0.0..150.0 -> 0
-            mode == Mode.VISUAL -> (255 * (1.0 - sincePulse / 150.0)).toInt()
-            else -> (60 * (1.0 - sincePulse / 150.0)).toInt()
-        }
-        if (pulseAlpha > 0) {
-            val r = 44
-            val size = if (mode == Mode.VISUAL) r else 16
-            guiGraphics.fill(
-                width / 2 - size, height / 2 - size,
-                width / 2 + size, height / 2 + size,
-                (pulseAlpha shl 24) or 0x66CCFF,
-            )
+            MetronomeSound.play(accent = beatIndex % 4 == 0)
         }
 
-        // 采样（接受节拍前后 ±300ms）
-        val list = samples()
+        // ---- 采样：无上限，接受 ±600ms ----
         for (hit in KeyInputBuffer.drain()) {
-            if (list.size >= maxSamples) continue
             var delta = nowMs - lastPulseAtMs
             if (delta > beatIntervalMs / 2) delta -= beatIntervalMs
-            if (abs(delta) <= beatIntervalMs / 2) {
-                list += delta
-            }
+            if (abs(delta) <= beatIntervalMs / 2) samples += delta
             @Suppress("UNUSED_EXPRESSION") hit.color
             @Suppress("UNUSED_EXPRESSION") hit.side
         }
-        if (list.size >= 5) {
-            val med = -list.sorted()[list.size / 2]
-            if (mode == Mode.VISUAL) recommendedVisual = med else recommendedAudio = med
+
+        when (mode) {
+            Mode.PULSE -> renderPulseMode(guiGraphics, nowMs)
+            Mode.MINI_CHART -> renderMiniChart(guiGraphics, nowMs)
         }
 
+        renderStats(guiGraphics)
+    }
+
+    // ------------------------------------------------------------------
+    // 模式 1：太鼓音符闪烁
+    // ------------------------------------------------------------------
+
+    private fun renderPulseMode(g: GuiGraphics, nowMs: Double) {
+        val sinceBeat = nowMs - lastPulseAtMs
         val cx = width / 2
+        val cy = height / 2
 
-        // 两个当前值（醒目）
-        guiGraphics.pose().pushPose()
-        guiGraphics.pose().translate(20f, 70f, 0f)
-        guiGraphics.pose().scale(1.2f, 1.2f, 1f)
-        guiGraphics.drawString(
-            font, "目押（视觉）：${currentVisual.roundToInt()} ms", 0, 0,
-            if (currentVisual == 0.0) 0xFFAAAAAA.toInt() else 0xFF7FE87F.toInt(),
-        )
-        guiGraphics.pose().popPose()
+        // 音符闪烁：600ms 内从大到小、由亮到暗
+        if (sinceBeat in 0.0..600.0) {
+            val t = (sinceBeat / 600.0).toFloat()
+            val r = (60 + 40 * t).toInt()
+            val alpha = ((1f - t) * 255).toInt().coerceIn(0, 255)
+            drawTaikoNote(g, cx, cy, r, NoteColor.DON, alpha, big = true)
+        }
 
-        guiGraphics.pose().pushPose()
-        guiGraphics.pose().translate(20f, 92f, 0f)
-        guiGraphics.pose().scale(1.2f, 1.2f, 1f)
-        guiGraphics.drawString(
-            font, "音押（判定）：${currentAudio.roundToInt()} ms", 0, 0,
-            if (currentAudio == 0.0) 0xFFAAAAAA.toInt() else 0xFF7FE87F.toInt(),
-        )
-        guiGraphics.pose().popPose()
+        // 常驻静止音符（提示位置）
+        drawTaikoNote(g, cx, cy, 50, NoteColor.DON, 60, big = true)
 
-        // 当前模式说明
-        guiGraphics.drawCenteredString(font, "当前模式：${mode.label}", cx, height / 3 - 44, 0xFFFFFFFF.toInt())
-        guiGraphics.drawCenteredString(font, mode.hint, cx, height / 3 - 26, 0xFFAAAAAA.toInt())
-        guiGraphics.drawCenteredString(
-            font, "已采样：${list.size} / $maxSamples", cx, height / 3 + 64, 0xFF7FE87F.toInt(),
+        g.drawCenteredString(font, "跟着闪烁的音符敲击（${TaikoKeyConfigHint.hint()}）", cx, cy + 120, 0xFFAAAAAA.toInt())
+        g.drawCenteredString(font, "间隔 ${beatIntervalMs.toInt()}ms，每 4 拍重音", cx, cy + 136, 0xFF777777.toInt())
+    }
+
+    // ------------------------------------------------------------------
+    // 模式 2：无尽小关卡
+    // ------------------------------------------------------------------
+
+    private fun renderMiniChart(g: GuiGraphics, nowMs: Double) {
+        val laneLeft = (width * 0.2).toInt()
+        val laneRight = (width * 0.8).toInt()
+        val cy = height / 2
+        val pxPerMs = (laneRight - laneLeft) / (beatIntervalMs * 2.5)
+
+        g.fill(laneLeft, cy - 30, laneRight, cy + 30, 0xE62B2E33.toInt())
+        g.fill(laneLeft, cy - 30, laneLeft + 2, cy + 30, 0xFFFFFFFF.toInt())
+
+        // 音符从右往左
+        for (note in miniNotes) {
+            val d = note.timeMs - nowMs
+            if (d < -400 || d > beatIntervalMs * 2.5) continue
+            val x = laneLeft + (d * pxPerMs).toInt()
+            if (x < laneLeft - 40 || x > laneRight + 40) continue
+            drawTaikoNote(g, x, cy, 22, note.color, 255, big = false)
+        }
+
+        g.drawCenteredString(
+            font, "音符到达左侧白线时敲击（${TaikoKeyConfigHint.hint()}）",
+            width / 2, cy + 80, 0xFFAAAAAA.toInt(),
         )
-        if (list.size >= 3) {
-            guiGraphics.drawCenteredString(
-                font, "平均偏差：${list.average().roundToInt()} ms", cx, height / 3 + 82, 0xFFFFD24A.toInt(),
+    }
+
+    // ------------------------------------------------------------------
+    // 统计与结果
+    // ------------------------------------------------------------------
+
+    private fun renderStats(g: GuiGraphics) {
+        val cx = width / 2
+        val y = height - 100
+
+        g.drawCenteredString(font, "目标：${target.label}", cx, y - 20, 0xFFFFFFFF.toInt())
+        g.drawCenteredString(font, "已采样：${samples.size} 次（无上限）", cx, y, 0xFF7FE87F.toInt())
+
+        if (samples.isNotEmpty()) {
+            val avg = samples.average()
+            val med = samples.sorted()[samples.size / 2]
+            g.drawCenteredString(
+                font, "平均偏差 ${avg.roundToInt()} ms   中位数 ${med.roundToInt()} ms",
+                cx, y + 16, 0xFFFFD24A.toInt(),
             )
-            guiGraphics.drawCenteredString(
-                font, "推荐：${recommended().roundToInt()} ms", cx, height / 3 + 100, 0xFFFFD24A.toInt(),
+            g.drawCenteredString(
+                font, "推荐值：${(-med).roundToInt()} ms",
+                cx, y + 32, 0xFFFFD24A.toInt(),
             )
         }
 
-        if (mode == Mode.AUDIO) {
-            guiGraphics.drawCenteredString(
-                font, "提示：戴耳机，闭眼，跟着听到的「嗒」声按", cx, height - 60, 0xFF888888.toInt(),
-            )
-            guiGraphics.drawCenteredString(
-                font, "每 4 拍一次重拍（音更高）", cx, height - 48, 0xFF888888.toInt(),
-            )
+        g.drawCenteredString(
+            font,
+            "当前：目押 ${currentVisual.roundToInt()} ms   音押 ${currentAudio.roundToInt()} ms",
+            cx, y + 54, 0xFF888888.toInt(),
+        )
+    }
+
+    // ------------------------------------------------------------------
+    // 绘图
+    // ------------------------------------------------------------------
+
+    /** 画太鼓音符（白边空心圆，颜色 = 咚红 / 咔蓝） */
+    private fun drawTaikoNote(g: GuiGraphics, cx: Int, cy: Int, r: Int, color: NoteColor, alpha: Int, big: Boolean) {
+        if (r <= 0) return
+        val a = alpha.coerceIn(0, 255) shl 24
+        val c = if (color == NoteColor.DON) 0xFFE8453C.toInt() else 0xFF4FC3D9.toInt()
+        drawDisc(g, cx, cy, r, a or 0xFFFFFF, 1)
+        drawDisc(g, cx, cy, r - 4, a or (c and 0xFFFFFF), 1)
+        if (big) drawDisc(g, cx, cy, (r / 5).coerceAtLeast(2), a or 0xFFFFFF, 1)
+    }
+
+    private fun drawDisc(g: GuiGraphics, cx: Int, cy: Int, r: Int, color: Int, step: Int) {
+        if (r <= 0) return
+        val r2 = r * r
+        var dy = -r
+        while (dy <= r) {
+            val half = sqrt((r2 - dy * dy).toDouble()).toInt()
+            g.fill(cx - half, cy + dy, cx + half + 1, cy + dy + step, color)
+            dy += step
         }
     }
 
     override fun isPauseScreen(): Boolean = false
+}
+
+/** 键位提示文案 */
+private object TaikoKeyConfigHint {
+    fun hint(): String {
+        val m = top.drawtwice.taikocraft.client.input.TaikoKeyConfig.mapping
+        fun k(i: Int) = top.drawtwice.taikocraft.client.input.KeyMapping.keyName(i)
+        return "左咔${k(m.leftKa)} 左咚${k(m.leftDon)} 右咚${k(m.rightDon)} 右咔${k(m.rightKa)}"
+    }
 }

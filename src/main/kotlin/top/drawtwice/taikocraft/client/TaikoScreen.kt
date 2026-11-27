@@ -5,51 +5,47 @@ import net.minecraft.client.gui.screens.Screen
 import net.minecraft.network.chat.Component
 import top.drawtwice.taikocraft.chart.NoteColor
 import top.drawtwice.taikocraft.judge.Judgment
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 /**
  * 下落式谱面界面。
  *
- * ## 视觉（对齐参考视频的第二张图）
+ * ## 视觉尺寸全部来自 OpenTaiko 默认皮肤（1280×720 基准）
  * ```
- * ┌──────────┬──────────────────────────────────────────┐
- * │          │  ◎ ●●●●  ●●●  ●●●●  ●●●        │ ← 1P 轨道
- * │  橙色     ├──────────────────────────────────────────┤
- * │  信息区   │  ◎ ●●●●  ●●●  ●●●●  ●●●        │ ← 2P 轨道
- * └──────────┴──────────────────────────────────────────┘
+ * Game_Notes_Size     = 130px    音符边长
+ * Game_Notes_Interval = 960px    每 4 拍距离
+ * Game_Lane_X         = 333      轨道左边界
+ * Game_Lane_Y         = {192,368} 1P/2P 轨道中心 Y
  * ```
+ * 见 [TaikoVisuals]。
  *
- * **音符是「白边空心圆」**：
- * - 外圈：白色实心环（厚度约 3px）
- * - 中间：深色底
- * - 内芯：彩色实心圆（咚=红 / 咔=蓝）
- *
- * 早期版本画成实心圆是错的。
+ * ## 判定线位置（关键修复）
+ * **判定线 X 必须等于音符 x=0 的位置**，两者共用同一坐标原点。
+ * 早期版本把判定圈画在 `laneLeft + 26`，而音符从 `laneLeft` 起算，
+ * 导致命中点落在橙/灰交界线而不是圆圈内 —— 这是错的。
  */
 class TaikoScreen(
     private val session: PlaySession,
     private val previous: Screen? = null,
 ) : TaikoScreenBase(Component.literal("TaikoCraft")) {
 
-    // 参考图配色
-    private val donColor = 0xFFE8453C.toInt()      // 咚：红
-    private val kaColor = 0xFF7DD8DC.toInt()       // 咔：青蓝
-    private val noteBgColor = 0xFF23262B.toInt()   // 音符内底色
-    private val outerRingColor = 0xFFFFFFFF.toInt() // 外白环
-    private val laneBg = 0xFF2B2E33.toInt()        // 轨道底
-    private val laneTopBar = 0xFFE07820.toInt()    // 顶部橙色条
-    private val laneBottomBar = 0xFFB0B0B0.toInt() // 底部灰条
-    private val infoPanelBg = 0xFFE07A28.toInt()   // 左侧信息区（橙）
-    private val centerStrip = 0xFF9A9A9A.toInt()   // 两轨之间的灰带
-    private val barLineColor = 0xFFFFFFFF.toInt()  // 小节线（白竖线）
-    private val judgeRingColor = 0xFFB8BCC0.toInt() // 判定线与音符 #129 的叠加
+    // OpenTaiko 默认皮肤色
+    private val donColor = 0xFFE8453C.toInt()
+    private val kaColor = 0xFF4FC3D9.toInt()
+    private val laneBg = 0xE62B2E33.toInt()
+    private val laneEdge = 0xFFB0B0B0.toInt()
+    private val panelBg = 0xFFE07A28.toInt()
 
-    /**
-     * 每「4 个四分音符」占多少像素（OpenTaiko 的 Game_Notes_Interval）。
-     * 变速实现：音符位置 = Δms × bpmAtNote / 240000 × pxPer4Beats
-     * BPM 越高 → 同样的时间距离对应更多的 4 分音符 → 音符跑得更远（视觉加速）
-     */
-
-    private var debugVisibleNotes = 0
+    // 每帧计算
+    private var judgeX = 0
+    private var laneRight = 0
+    private var laneH = 0
+    private var center1P = 0
+    private var center2P = 0
+    private var noteR = 0
+    private var pxPer4Beats = 0.0
+    private var show2P = false
 
     override fun init() {
         super.init()
@@ -58,247 +54,312 @@ class TaikoScreen(
 
     override fun renderContent(guiGraphics: GuiGraphics, mouseX: Int, mouseY: Int, partialTick: Float) {
         session.tick()
-
         val now = session.renderTimeMs
-
-        // ---- 布局 ----
-        val panelW = (width * 0.145).toInt().coerceAtLeast(90)   // 左侧信息区
-        val laneLeft = panelW
-        val laneRight = width - 4
-        val laneTop = (height * 0.20).toInt()
-        val laneBottom = (height * 0.80).toInt()
-        val stripH = (height * 0.025).toInt().coerceAtLeast(8)    // 中间灰带
-        val trackH = ((laneBottom - laneTop - stripH) / 2).coerceAtLeast(20)
-        val lane1Top = laneTop
-        val lane1Bottom = laneTop + trackH
-        val lane2Top = lane1Bottom + stripH
-        val lane2Bottom = lane2Top + trackH
-        val laneWidth = (laneRight - laneLeft).coerceAtLeast(1)
-        // ★ 判定线位置：音符 x=0 时正好在这里。必须与音符绘制起点一致
-        val judgeX = laneLeft
-        // 自适应：让基准 BPM 下的「4 拍」约占轨道宽度的 1/4
-        val pxPer4Beats = (laneWidth / 4.0).coerceAtLeast(40.0)
-
-        // ---- 左侧信息区（橙色面板）----
-        guiGraphics.fill(0, lane1Top, panelW, lane1Bottom, infoPanelBg)
-        guiGraphics.fill(0, lane2Top, panelW, lane2Bottom, infoPanelBg)
-
-        // ---- 两条轨道 ----
-        for ((top, bottom) in listOf(lane1Top to lane1Bottom, lane2Top to lane2Bottom)) {
-            guiGraphics.fill(laneLeft, top, laneRight, bottom, laneBg)
-            // 顶部橙色细条 / 底部灰条
-            guiGraphics.fill(laneLeft, top, laneRight, top + 2, laneTopBar)
-            guiGraphics.fill(laneLeft, bottom - 3, laneRight, bottom, laneBottomBar)
-        }
-        // 中间灰带
-        guiGraphics.fill(laneLeft, lane1Bottom, laneRight, lane2Top, centerStrip)
-
-        // ---- 小节线（白竖线）----
-        // ★ 小节线用它自己所在位置的 BPM，否则变速段会与音符错位
-        for (bar in session.chart.barLines) {
-            val d = bar.timeMs - now
-            val n4 = d * bar.bpmAtBar / 240000.0
-            val x = laneLeft + (n4 * pxPer4Beats).toInt()
-            if (x < laneLeft || x > laneRight) continue
-            guiGraphics.fill(x, lane1Top, x + 1, lane1Bottom, 0x80FFFFFF.toInt())
-            guiGraphics.fill(x, lane2Top, x + 1, lane2Bottom, 0x80FFFFFF.toInt())
-        }
-
-        // ---- 判定线（左侧同心双环，参考图第二张）----
-        drawJudgeMarker(guiGraphics, judgeX, (lane1Top + lane1Bottom) / 2, trackH)
-        drawJudgeMarker(guiGraphics, judgeX, (lane2Top + lane2Bottom) / 2, trackH)
-
-        // ---- 音符 ----
         val notes = session.judge.notesSnapshot()
-        debugVisibleNotes = 0
-        val cy1 = (lane1Top + lane1Bottom) / 2
-        val cy2 = (lane2Top + lane2Bottom) / 2
 
-        // 时间窗只需覆盖「最大 BPM 下轨道能显示的距离」
-        val maxBpm = notes.maxOfOrNull { it.bpmAtNote } ?: 120.0
-        val aheadMs = 240000.0 * (laneWidth / pxPer4Beats) / maxBpm
-        val windowStartMs = now - 250.0
-        val windowEndMs = now + aheadMs * 1.05
-        var idx = lowerBound(notes, windowStartMs)
-        while (idx < notes.size) {
-            val noteIndex = idx
-            val note = notes[idx]
-            if (note.timeMs > windowEndMs) break
-            idx++
+        // ---------------- 布局（OpenTaiko 基准换算） ----------------
+        judgeX = TaikoVisuals.laneX(width)
+        laneRight = width - (width / 10).coerceAtLeast(30)
+        val sc = TaikoVisuals.scaleFor(width)
+        val hs = height / TaikoVisuals.REF_HEIGHT
+        noteR = (TaikoVisuals.NOTE_SIZE_BASE * sc / 2).toInt().coerceAtLeast(8)
+        pxPer4Beats = TaikoVisuals.NOTE_INTERVAL_BASE * sc
+        laneH = (TaikoVisuals.LANE_HEIGHT_BASE * hs).toInt().coerceIn(28, 120)
+        center1P = (TaikoVisuals.LANE_Y_1P_BASE * hs).toInt()
+        center2P = (TaikoVisuals.LANE_Y_2P_BASE * hs).toInt()
 
-            // ★ 变速：位置按「4 分音符距离」计算（OpenTaiko Normal 模式）
-            val deltaMs = note.timeMs - now
-            val n4Beats = deltaMs * note.bpmAtNote / 240000.0
-            val x = laneLeft + (n4Beats * pxPer4Beats).toInt()
-            if (x < laneLeft - 40 || x > laneRight + 40) continue
+        // 2P 轨道仅在存在 2P 音符时显示（坠尔要求）
+        show2P = notes.any { it.player == 2 }
 
-            val cy = if (note.player == 1) cy1 else cy2
-            val judged = session.judge.isJudged(noteIndex)
-            val r = if (note.big) 15 else 11
-            val inner = if (note.color == NoteColor.DON) donColor else kaColor
-            val alpha = if (judged) 0x55 else 0xFF
-            drawHollowNote(guiGraphics, x, cy, r, inner, alpha)
-
-            if (note.player == 1) debugVisibleNotes++
+        // ---------------- 左侧面板 ----------------
+        val panelRight = judgeX - 4
+        if (panelRight > 30) {
+            guiGraphics.fill(0, center1P - laneH / 2 - 4, panelRight, center1P + laneH / 2 + 4, panelBg)
+            if (show2P) guiGraphics.fill(0, center2P - laneH / 2 - 4, panelRight, center2P + laneH / 2 + 4, panelBg)
         }
 
-        // ---- 命中特效：打中即爆开 ----
-        // 位置固定在判定线附近（命中瞬间音符就在那里）
-        for (fx in session.hitFx) {
-            val age = session.judgeTimeMs - fx.startMs
-            if (age < 0 || age > 400) continue          // 400ms 生命周期
-            val t = (age / 400.0).toFloat()             // 0..1 进度
-            val baseX = judgeX
-            val baseY = if (fx.color == NoteColor.DON) cy1 else cy1
-            val col = if (fx.color == NoteColor.DON) donColor else kaColor
-            val alpha = ((1f - t) * 255).toInt().coerceIn(0, 255) shl 24
-            val maxR = if (fx.big) 34 else 24
-            val r = (6 + maxR * t).toInt()
+        // ---------------- 轨道 ----------------
+        drawLane(guiGraphics, center1P)
+        if (show2P) drawLane(guiGraphics, center2P)
 
-            // 1) 扩散圆环
-            drawRing(guiGraphics, baseX, baseY, r, 3, alpha or (col and 0xFFFFFF))
-            // 2) 四向爆开线条
-            val len = (4 + 18 * t).toInt()
-            val lw = (3 * (1f - t)).toInt().coerceAtLeast(1)
-            val c = alpha or (col and 0xFFFFFF)
-            guiGraphics.fill(baseX - r - len, baseY - lw / 2, baseX - r, baseY + lw / 2 + 1, c)
-            guiGraphics.fill(baseX + r, baseY - lw / 2, baseX + r + len, baseY + lw / 2 + 1, c)
-            guiGraphics.fill(baseX - lw / 2, baseY - r - len, baseX + lw / 2 + 1, baseY - r, c)
-            guiGraphics.fill(baseX - lw / 2, baseY + r, baseX + lw / 2 + 1, baseY + r + len, c)
-            // 3) 中心闪光（前 100ms）
-            if (age < 100) {
-                val flashA = ((1f - age.toFloat() / 100f) * 200).toInt().coerceIn(0, 255) shl 24
-                drawDisc(guiGraphics, baseX, baseY, (maxR * 0.5).toInt(), flashA or 0xFFFFFF, fillHeight = 1)
-            }
+        // ---------------- 小节线 ----------------
+        for (bar in session.chart.barLines) {
+            val n4 = (bar.timeMs - now) * bar.bpmAtBar / 240000.0
+            val x = judgeX + (n4 * pxPer4Beats).toInt()
+            if (x < judgeX || x > laneRight) continue
+            guiGraphics.fill(x, center1P - laneH / 2, x + 1, center1P + laneH / 2, 0x50FFFFFF)
+            if (show2P) guiGraphics.fill(x, center2P - laneH / 2, x + 1, center2P + laneH / 2, 0x50FFFFFF)
         }
 
-        // ---- 判定文字（判定线右侧）----
-        val result = session.lastResult
-        if (result != null && session.judgeTimeMs - session.lastResultAtMs < 450) {
-            val text = when (result.judgment) {
-                Judgment.PERFECT -> "良"
-                Judgment.GOOD -> "可"
-                Judgment.POOR -> "不可"
-                Judgment.MISS -> "不可"
-            }
-            val color = when (result.judgment) {
-                Judgment.PERFECT -> 0xFFFFD24A.toInt()
-                Judgment.GOOD -> 0xFFFFFFFF.toInt()
-                Judgment.POOR -> 0xFFAAAAAA.toInt()
-                Judgment.MISS -> 0xFFFF5555.toInt()
-            }
-            guiGraphics.drawCenteredString(font, text, judgeX + 70, cy1 - 40, color)
-        }
+        // ---------------- 长条 / 气球 ----------------
+        drawRolls(guiGraphics, now)
+        drawBalloons(guiGraphics, now)
 
-        // ---- 左上角调试信息（对齐参考图）----
-        var dy = 4
-        guiGraphics.drawString(font, "TaikoCraft", 6, dy, 0xFFAAAAAA.toInt()); dy += 11
-        guiGraphics.drawString(font, "谱面播放进度: ${"%.0f".format(now)}ms", 6, dy, 0xFFFFFFFF.toInt()); dy += 11
-        guiGraphics.drawString(font, "音频播放进度: ${"%.0f".format(session.clock.songPositionMs)}ms", 6, dy, 0xFFFFFFFF.toInt()); dy += 11
-        guiGraphics.drawString(
-            font,
-            "音频播放时差: ${"%.0f".format(now - session.clock.songPositionMs)}ms",
-            6, dy, 0xFFAAAAAA.toInt(),
-        ); dy += 11
-        guiGraphics.drawString(font, "目押 ${"%.0f".format(session.clock.visualOffsetMs)} / 音押 ${"%.0f".format(session.clock.audioOffsetMs)}ms", 6, dy, 0xFF888888.toInt()); dy += 11
-        guiGraphics.drawString(font, "可见音符: $debugVisibleNotes", 6, dy, 0xFF888888.toInt())
-        dy += 11
-        if (session.autoPlay) {
-            guiGraphics.drawString(font, "★ AUTO PLAY (OP)", 6, dy, 0xFFFFD24A.toInt())
-        }
+        // ---------------- 音符 ----------------
+        drawNotes(guiGraphics, now, notes)
 
-        // ---- 左侧面板文字 ----
-        guiGraphics.drawString(font, "1P", 8, lane1Top + 6, 0xFF3A2010.toInt())
-        guiGraphics.drawString(font, "2P", 8, lane2Top + 6, 0xFF3A2010.toInt())
-        guiGraphics.drawString(
-            font, session.chartFile.displayTitle.take(14),
-            6, lane2Bottom + 6, 0xFFAAAAAA.toInt(),
-        )
-        guiGraphics.drawString(
-            font, "分数 ${session.judge.currentScore}",
-            6, lane2Bottom + 18, 0xFFFFD24A.toInt(),
-        )
-        guiGraphics.drawString(
-            font, "连击 ${session.judge.currentCombo}",
-            6, lane2Bottom + 30, 0xFF7FE87F.toInt(),
-        )
-        guiGraphics.drawString(font, "ESC 返回选曲", 6, height - 14, 0xFF666666.toInt())
+        // ---------------- 背景闪光（轻，不干扰读谱） ----------------
+        drawLaneFlash(guiGraphics)
+
+        // ---------------- 判定线 ----------------
+        guiGraphics.fill(judgeX, center1P - laneH / 2, judgeX + 2, center1P + laneH / 2, 0xFFFFFFFF.toInt())
+        if (show2P) guiGraphics.fill(judgeX, center2P - laneH / 2, judgeX + 2, center2P + laneH / 2, 0xFFFFFFFF.toInt())
+
+        // ---------------- 平面太鼓 ----------------
+        drawFlatTaiko(guiGraphics)
+
+        // ---------------- 判定文字 + 偏移调试 ----------------
+        drawJudgeFeedback(guiGraphics)
+
+        // ---------------- 信息 ----------------
+        drawInfo(guiGraphics, now)
     }
 
-    /** 判定线标记：同心双环（参考图左侧的灰色双圈） */
-    private fun drawJudgeMarker(g: GuiGraphics, cx: Int, cy: Int, trackH: Int) {
-        // 与小音符同大小（小音符 r=11）
-        val r = 13
-        drawRing(g, cx, cy, r, 2, judgeRingColor and 0xB0FFFFFF.toInt())
-        drawRing(g, cx, cy, r - 5, 2, judgeRingColor and 0x70FFFFFF.toInt())
+    // ==================================================================
+    // 轨道 & 音符
+    // ==================================================================
+
+    private fun drawLane(g: GuiGraphics, centerY: Int) {
+        val top = centerY - laneH / 2
+        val bottom = centerY + laneH / 2
+        g.fill(judgeX, top, laneRight, bottom, laneBg)
+        g.fill(judgeX, top, laneRight, top + 1, laneEdge)
+        g.fill(judgeX, bottom - 1, laneRight, bottom, laneEdge)
     }
 
-    /**
-     * 画「白边空心圆」音符（参考视频第二张图）。
-     *
-     * 由外到内 5 层：
-     * ```
-     *   ┌──────────── 外白环（厚约 3-4px，最亮）
-     *   │ ┌────────── 深色描边（1px，把白环和内底分开）
-     *   │ │ ┌──────── 深灰内底
-     *   │ │ │ ┌────── 彩色内芯（咚红 / 咔青）
-     *   │ │ │ │ ┌──── 高光（左上角小亮点）
-     * ```
-     */
-    private fun drawHollowNote(g: GuiGraphics, cx: Int, cy: Int, r: Int, innerColor: Int, alpha: Int) {
-        if (alpha <= 0) return
+    private fun drawNotes(g: GuiGraphics, now: Double, notes: List<top.drawtwice.taikocraft.chart.Note>) {
+        // 轨道宽度内能容纳的 4 拍数 → 换算成时间窗
+        val maxN4 = (laneRight - judgeX) / pxPer4Beats
+        val maxBpm = notes.maxOfOrNull { it.bpmAtNote } ?: 200.0
+        val aheadMs = 240000.0 * maxN4 / maxBpm
+
+        var i = lowerBound(notes, now - 200.0)
+        while (i < notes.size) {
+            val idx = i
+            val note = notes[i]
+            if (note.timeMs > now + aheadMs) break
+            i++
+            if (note.player == 2 && !show2P) continue
+
+            val d = note.timeMs - now
+            val n4 = d * note.bpmAtNote / 240000.0
+            val x = judgeX + (n4 * pxPer4Beats).toInt()
+            if (x < judgeX - noteR * 2 || x > laneRight + noteR * 2) continue
+
+            val cy = if (note.player == 1) center1P else center2P
+            val judged = session.judge.isJudged(idx)
+            val alpha = if (judged) 45 else 255
+            val color = if (note.color == NoteColor.DON) donColor else kaColor
+            val r = if (note.big) (noteR * 5 / 4) else noteR
+            drawNote(g, x, cy, r, color, alpha, note.big)
+        }
+    }
+
+    /** 音符：白边 + 彩色实心（OpenTaiko 默认皮肤风格） */
+    private fun drawNote(g: GuiGraphics, cx: Int, cy: Int, r: Int, color: Int, alpha: Int, big: Boolean) {
         val a = alpha.coerceIn(0, 255) shl 24
-        // 1. 外白环（实心白圆，后面会被内层覆盖中间）
-        drawDisc(g, cx, cy, r, a or 0xFFFFFF, fillHeight = 1)
-        // 2. 深色描边
-        drawDisc(g, cx, cy, r - 3, a or 0x1A1A1A, fillHeight = 1)
-        // 3. 深灰内底
-        drawDisc(g, cx, cy, r - 4, a or 0x2A2E35, fillHeight = 1)
-        // 4. 彩色内芯
-        val innerR = (r - 7).coerceAtLeast(2)
-        drawDisc(g, cx, cy, innerR, a or (innerColor and 0xFFFFFF), fillHeight = 1)
-        // 5. 高光（左上角，纯视觉，不改变判定）
-        if (r >= 10) {
-            drawDisc(g, cx - innerR / 3, cy - innerR / 3, (innerR / 3).coerceAtLeast(1), a or 0xFFFFFF, fillHeight = 1)
+        drawDisc(g, cx, cy, r, a or 0xFFFFFF, 1)
+        drawDisc(g, cx, cy, (r - 4).coerceAtLeast(2), a or (color and 0xFFFFFF), 1)
+        if (big) drawDisc(g, cx, cy, (r / 5).coerceAtLeast(2), a or 0xFFFFFF, 1)
+    }
+
+    // ==================================================================
+    // 长条 / 气球（此前完全没渲染 —— 坠尔反馈"能打但不显示"）
+    // ==================================================================
+
+    private fun drawRolls(g: GuiGraphics, now: Double) {
+        for (roll in session.chart.rolls) {
+            if (roll.endMs < now - 500) continue
+            val x1 = timeToX(roll.startMs, now)
+            val x2 = timeToX(roll.endMs, now)
+            if (x2 < judgeX - noteR) continue
+            drawBar(g, x1, x2, center1P, 0xFFB84040.toInt())
         }
     }
 
-    /** 画圆环（只画边框） */
-    private fun drawRing(g: GuiGraphics, cx: Int, cy: Int, r: Int, thickness: Int, color: Int) {
-        val rOut2 = r * r
-        val rIn = (r - thickness).coerceAtLeast(1)
-        val rIn2 = rIn * rIn
-        var dy = -r
-        while (dy <= r) {
-            val y = cy + dy
-            val outerHalf = kotlin.math.sqrt((rOut2 - dy * dy).toDouble()).toInt()
-            val innerHalf = if (kotlin.math.abs(dy) <= rIn) kotlin.math.sqrt((rIn2 - dy * dy).toDouble()).toInt() else 0
-            // 左段 + 右段（中间挖空）
-            g.fill(cx - outerHalf, y, cx - innerHalf, y + 2, color)
-            g.fill(cx + innerHalf, y, cx + outerHalf + 1, y + 2, color)
-            dy += 2
+    private fun drawBalloons(g: GuiGraphics, now: Double) {
+        for (balloon in session.chart.balloons) {
+            if (balloon.endMs < now - 500) continue
+            val x1 = timeToX(balloon.startMs, now)
+            val x2 = timeToX(balloon.endMs, now)
+            if (x2 < judgeX - noteR) continue
+            drawBar(g, x1, x2, center1P, 0xFF5BA3C9.toInt())
+
+            // 中心显示剩余击打数
+            val mid = (maxOf(x1, judgeX) + minOf(x2, laneRight)) / 2
+            val remain = (balloon.requiredHits - session.judge.balloonHitsOf(balloon)).coerceAtLeast(0)
+            drawDisc(g, mid, center1P, laneH / 2, 0xFFFFFFFF.toInt(), 1)
+            drawDisc(g, mid, center1P, laneH / 2 - 3, 0xFF5BA3C9.toInt(), 1)
+            g.drawCenteredString(font, remain.toString(), mid, center1P - 4, 0xFFFFFFFF.toInt())
         }
     }
 
-    /** 画实心圆（纵向步长 2px 提高性能） */
-    private fun drawDisc(g: GuiGraphics, cx: Int, cy: Int, r: Int, color: Int, fillHeight: Int = 2) {
+    private fun drawBar(g: GuiGraphics, x1: Int, x2: Int, cy: Int, color: Int) {
+        val left = minOf(x1, x2).coerceAtLeast(judgeX)
+        val right = maxOf(x1, x2).coerceAtMost(laneRight)
+        if (right <= left) return
+        val h = (noteR * 3 / 2).coerceAtLeast(8)
+        val top = cy - h / 2
+        g.fill(left, top - 2, right, top + h + 2, 0xFFFFFFFF.toInt())
+        g.fill(left, top, right, top + h, color)
+        drawDisc(g, left, cy, h / 2 + 2, 0xFFFFFFFF.toInt(), 1)
+        drawDisc(g, right, cy, h / 2 + 2, 0xFFFFFFFF.toInt(), 1)
+        drawDisc(g, left, cy, h / 2, color, 1)
+        drawDisc(g, right, cy, h / 2, color, 1)
+    }
+
+    /** 时刻 → 屏幕 x（用该时刻所在 BPM 的节拍距离） */
+    private fun timeToX(timeMs: Double, now: Double): Int {
+        val d = timeMs - now
+        return judgeX + (d * bpmAt(timeMs) / 240000.0 * pxPer4Beats).toInt()
+    }
+
+    private fun bpmAt(timeMs: Double): Double {
+        val notes = session.judge.notesSnapshot()
+        if (notes.isEmpty()) return session.chart.bpm
+        return notes[lowerBound(notes, timeMs).coerceIn(0, notes.size - 1)].bpmAtNote
+    }
+
+    // ==================================================================
+    // 背景闪光（对齐 OpenTaiko LaneFlash：100ms 衰减，很轻）
+    // ==================================================================
+
+    private fun drawLaneFlash(g: GuiGraphics) {
+        val r = session.lastResult ?: return
+        val age = session.judgeTimeMs - session.lastResultAtMs
+        if (age < 0 || age > 100) return
+        val alpha = ((1 - age / 100.0) * 55).toInt().coerceIn(0, 60)
+        if (alpha <= 0) return
+        val c = if (r.color == NoteColor.DON) 0xE8453C else 0x4FC3D9
+        g.fill(judgeX, center1P - laneH / 2, laneRight, center1P + laneH / 2, (alpha shl 24) or c)
+        if (show2P) g.fill(judgeX, center2P - laneH / 2, laneRight, center2P + laneH / 2, (alpha shl 24) or c)
+    }
+
+    // ==================================================================
+    // 平面太鼓（左侧，实时显示咚/咔状态）
+    // ==================================================================
+
+    private fun drawFlatTaiko(g: GuiGraphics) {
+        val cx = (judgeX / 2).coerceAtLeast(30)
+        val cy = center1P
+        val r = (noteR * 2).coerceIn(24, 70)
+        val innerR = (r * 55 / 100).coerceAtLeast(10)
+
+        // 咔区（外环）
+        drawDisc(g, cx, cy, r, 0xFFE8E2DA.toInt(), 2)
+        // 咚区（内圈）
+        drawDisc(g, cx, cy, innerR, 0xFFC9BEB2.toInt(), 2)
+
+        val result = session.lastResult ?: return
+        val age = session.judgeTimeMs - session.lastResultAtMs
+        if (age in 0.0..90.0) {
+            val a = ((1 - age / 90.0) * 220).toInt().coerceIn(0, 255) shl 24
+            val c = if (result.color == NoteColor.DON) 0xFFE8453C.toInt() else 0xFF4FC3D9.toInt()
+            if (result.color == NoteColor.DON) {
+                drawDisc(g, cx, cy, innerR, a or (c and 0xFFFFFF), 2)
+            } else {
+                drawRing(g, cx, cy, r - 2, (r - innerR).coerceAtLeast(4), a or (c and 0xFFFFFF))
+            }
+        }
+    }
+
+    // ==================================================================
+    // 判定反馈 + 偏移调试（坠尔要求：知道打早还是打晚）
+    // ==================================================================
+
+    private fun drawJudgeFeedback(g: GuiGraphics) {
+        val result = session.lastResult ?: return
+        val age = session.judgeTimeMs - session.lastResultAtMs
+        if (age < 0 || age > 600) return
+
+        val text = when (result.judgment) {
+            Judgment.PERFECT -> "良"
+            Judgment.GOOD -> "可"
+            Judgment.POOR -> "不可"
+            Judgment.MISS -> "不可"
+        }
+        val color = when (result.judgment) {
+            Judgment.PERFECT -> 0xFFFFD24A.toInt()
+            Judgment.GOOD -> 0xFFFFFFFF.toInt()
+            Judgment.POOR -> 0xFFAAAAAA.toInt()
+            Judgment.MISS -> 0xFFFF5555.toInt()
+        }
+        val fx = judgeX + noteR * 2
+        g.drawString(font, text, fx, center1P - noteR - 4, color)
+
+        // ★ 偏移调试：正 = 打晚，负 = 打早
+        val noteTime = result.noteTimeMs ?: return
+        val off = session.lastResultAtMs - noteTime
+        if (abs(off) > 400) return
+        val sign = if (off >= 0) "+" else "−"
+        val ms = "%.1f".format(abs(off))
+        val c = when {
+            abs(off) <= 25 -> 0xFFFFD24A.toInt()
+            abs(off) <= 75 -> 0xFFFFFFFF.toInt()
+            else -> 0xFF999999.toInt()
+        }
+        g.drawString(font, "$sign$ms ms", fx, center1P - noteR + 8, c)
+    }
+
+    // ==================================================================
+    // 信息面板
+    // ==================================================================
+
+    private fun drawInfo(g: GuiGraphics, now: Double) {
+        var y = 4
+        g.drawString(font, "TaikoCraft", 4, y, 0xFFAAAAAA.toInt()); y += 10
+        g.drawString(font, "谱面 ${"%.0f".format(now)}ms", 4, y, 0xFFCCCCCC.toInt()); y += 10
+        g.drawString(font, "音频 ${"%.0f".format(session.clock.songPositionMs)}ms", 4, y, 0xFFCCCCCC.toInt()); y += 10
+        g.drawString(
+            font, "时差 ${"%.0f".format(now - session.clock.songPositionMs - session.clock.tjaOffsetMs)}ms",
+            4, y, 0xFF888888.toInt(),
+        ); y += 10
+        g.drawString(
+            font, "目 ${session.clock.visualOffsetMs.toInt()} 音 ${session.clock.audioOffsetMs.toInt()}",
+            4, y, 0xFF888888.toInt(),
+        ); y += 14
+        g.drawString(font, "分 ${session.judge.currentScore}", 4, y, 0xFFFFD24A.toInt()); y += 11
+        g.drawString(font, "连 ${session.judge.currentCombo}", 4, y, 0xFF7FE87F.toInt()); y += 11
+        g.drawString(font, "高 ${session.judge.maxComboSeen}", 4, y, 0xFF7FE87F.toInt()); y += 11
+        if (session.autoPlay) g.drawString(font, "AUTO", 4, y, 0xFFFFD24A.toInt())
+    }
+
+    // ==================================================================
+    // 工具
+    // ==================================================================
+
+    private fun drawDisc(g: GuiGraphics, cx: Int, cy: Int, r: Int, color: Int, step: Int) {
         if (r <= 0) return
         val r2 = r * r
         var dy = -r
         while (dy <= r) {
-            val half = kotlin.math.sqrt((r2 - dy * dy).toDouble()).toInt()
-            g.fill(cx - half, cy + dy, cx + half + 1, cy + dy + fillHeight, color)
-            dy += fillHeight
+            val half = sqrt((r2 - dy * dy).toDouble()).toInt()
+            g.fill(cx - half, cy + dy, cx + half + 1, cy + dy + step, color)
+            dy += step
         }
     }
 
-    /** 二分：第一个 timeMs >= target 的索引 */
-    private fun lowerBound(notes: List<top.drawtwice.taikocraft.chart.Note>, targetMs: Double): Int {
+    private fun drawRing(g: GuiGraphics, cx: Int, cy: Int, r: Int, thickness: Int, color: Int) {
+        if (r <= 0) return
+        val out2 = r * r
+        val inR = (r - thickness).coerceAtLeast(1)
+        val in2 = inR * inR
+        var dy = -r
+        while (dy <= r) {
+            val o = sqrt((out2 - dy * dy).toDouble()).toInt()
+            val i = if (abs(dy) <= inR) sqrt((in2 - dy * dy).toDouble()).toInt() else 0
+            g.fill(cx - o, cy + dy, cx - i, cy + dy + 2, color)
+            g.fill(cx + i, cy + dy, cx + o + 1, cy + dy + 2, color)
+            dy += 2
+        }
+    }
+
+    private fun lowerBound(notes: List<top.drawtwice.taikocraft.chart.Note>, target: Double): Int {
         var lo = 0
         var hi = notes.size
         while (lo < hi) {
             val mid = (lo + hi) ushr 1
-            if (notes[mid].timeMs < targetMs) lo = mid + 1 else hi = mid
+            if (notes[mid].timeMs < target) lo = mid + 1 else hi = mid
         }
         return lo
     }

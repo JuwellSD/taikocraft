@@ -282,5 +282,11 @@ class JudgeEngine(
     private fun rollScoreFor(big: Boolean): Int = if (big) 200 else 100
 
     fun notesSnapshot(): List<Note> = notes
+
+    /** 气球已击打次数（供 UI 显示剩余） */
+    fun balloonHitsOf(balloon: BalloonSegment): Int {
+        val idx = balloons.indexOf(balloon)
+        return if (idx >= 0) balloonHits[idx] else 0
+    }
     fun isJudged(index: Int): Boolean = judged[index]
 }
