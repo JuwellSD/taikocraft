@@ -77,7 +77,7 @@ object NoteSkinManager {
                 g.blit(
                     ORIGINAL_NOTES,
                     cx - r, cy - r,
-                    size, size,
+                    size.toFloat(), size.toFloat(),
                     frame * NOTES_FRAME_W, 0,
                     NOTES_FRAME_W, NOTES_FRAME_H,
                 )
