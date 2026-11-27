@@ -139,13 +139,35 @@ class PlaybackClock(
     private val chartBaseMs: Double
         get() = songPositionMs + tjaOffsetMs + leadInMs
 
-    /** 渲染用时间轴（音符位置）：受目押偏移影响 */
-    val chartTimeVisualMs: Double
-        get() = chartBaseMs - visualOffsetMs
+    // ------------------------------------------------------------------
+    // 两个偏移的语义（与常见太鼓模拟器一致）
+    //
+    //   音押偏移（audioOffsetMs）：**动整个音符** ——
+    //       谱面的视觉位置与判定时刻一起平移。
+    //       调它不会造成「看到的位置」和「判定的位置」错位。
+    //
+    //   目押偏移（visualOffsetMs）：**只动视觉** ——
+    //       在「音押已确定的判定时刻」基础上，额外把音符的**绘制位置**
+    //       提前/延后一点，让习惯提前或延后看谱的玩家感觉更顺。
+    //       它**故意**让视觉与判定错开，不影响实际打击判定。
+    // ------------------------------------------------------------------
 
-    /** 判定用时间轴（击打时刻换算）：受音押偏移影响 */
+    /**
+     * 判定时间轴（击打时刻换算）：只受**音押**影响。
+     *
+     * 音押 > 0：谱面整体提前（音符来得更早、判定点也提前）。
+     */
     val chartTimeJudgeMs: Double
         get() = chartBaseMs - audioOffsetMs
+
+    /**
+     * 渲染时间轴（音符字幕位置）：受**音押 + 目押**共同影响。
+     *
+     * = 判定时间轴 − 目押偏移
+     * 目押 > 0：音符在屏幕上显示得更早（视觉提前），判定不变。
+     */
+    val chartTimeVisualMs: Double
+        get() = chartTimeJudgeMs - visualOffsetMs
 
     val chartTimeMs: Double get() = chartTimeVisualMs
 

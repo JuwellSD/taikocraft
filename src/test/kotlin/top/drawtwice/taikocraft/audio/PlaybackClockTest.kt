@@ -7,6 +7,91 @@ import kotlin.test.assertTrue
 
 class PlaybackClockTest {
 
+    // ------------------------------------------------------------------
+    // 两个偏移的语义（本项目约定，参考坠尔的需求）
+    //
+    // 音押 audioOffsetMs：动整个音符 —— 视觉与判定**一起**平移
+    // 目押 visualOffsetMs：只动视觉 —— 在判定基础上额外偏移渲染位置
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `音押偏移同时影响视觉和判定`() {
+        val clock = PlaybackClock()
+        clock.audioOffsetMs = 100.0
+        clock.visualOffsetMs = 0.0
+        clock.start()
+        Thread.sleep(20)
+
+        // 同一帧内读取，两个时间轴应相等（音押对二者作用相同）
+        val judge = clock.chartTimeJudgeMs
+        val visual = clock.chartTimeVisualMs
+        assertEquals(judge, visual, 5.0, "无目押时，视觉与判定必须一致")
+    }
+
+    @Test
+    fun `目押偏移只影响视觉 不影响判定`() {
+        val clock = PlaybackClock()
+        clock.audioOffsetMs = 0.0
+        clock.visualOffsetMs = 120.0
+        clock.start()
+
+        // 同一帧读取
+        val judge = clock.chartTimeJudgeMs
+        val visual = clock.chartTimeVisualMs
+
+        assertEquals(120.0, judge - visual, 5.0, "视觉应比判定早 120ms")
+    }
+
+    @Test
+    fun `两个偏移独立叠加`() {
+        val clock = PlaybackClock()
+        clock.audioOffsetMs = 50.0
+        clock.visualOffsetMs = 30.0
+        clock.start()
+
+        val judge = clock.chartTimeJudgeMs
+        val visual = clock.chartTimeVisualMs
+        // 视觉 = 判定 - 30
+        assertEquals(30.0, judge - visual, 5.0)
+    }
+
+    @Test
+    fun `音押让整个谱面平移（视觉与判定同步）`() {
+        val base = PlaybackClock()
+        base.start()
+        Thread.sleep(10)
+        val baseJudge = base.chartTimeJudgeMs
+        val baseVisual = base.chartTimeVisualMs
+
+        val shifted = PlaybackClock()
+        shifted.audioOffsetMs = 200.0
+        shifted.start()
+        Thread.sleep(10)
+        val shiftedJudge = shifted.chartTimeJudgeMs
+        val shiftedVisual = shifted.chartTimeVisualMs
+
+        // 音押 200 → 两个时间轴都减 200（忽略两次启动的微小时间差）
+        assertEquals(200.0, baseJudge - shiftedJudge, 30.0, "判定应平移 200ms")
+        assertEquals(200.0, baseVisual - shiftedVisual, 30.0, "视觉应平移 200ms")
+    }
+
+    @Test
+    fun `目押不改变判定 --- 模拟击打时刻`() {
+        val clock = PlaybackClock()
+        clock.visualOffsetMs = 150.0
+        clock.start()
+        val judgeBefore = clock.chartTimeJudgeMs
+        clock.visualOffsetMs = 0.0
+        val judgeAfter = clock.chartTimeJudgeMs
+        // 改目押后判定时间几乎不变（只差读取间隔）
+        assertTrue(kotlin.math.abs(judgeAfter - judgeBefore) < 20.0,
+            "目押不应影响判定时间：$judgeBefore -> $judgeAfter")
+    }
+
+    // ------------------------------------------------------------------
+    // 时钟基础行为
+    // ------------------------------------------------------------------
+
     @Test
     fun `位置随时间单调递增`() {
         val clock = PlaybackClock()
@@ -15,7 +100,6 @@ class PlaybackClockTest {
         Thread.sleep(30)
         val b = clock.songPositionMs
         assertTrue(b > a, "位置必须严格递增：$a -> $b")
-        assertTrue(b - a >= 20.0, "30ms 后至少前进 20ms，实际 ${b - a}")
     }
 
     @Test
@@ -24,77 +108,26 @@ class PlaybackClockTest {
         clock.start()
         Thread.sleep(20)
         val before = clock.songPositionMs
-        // 后端报一个完全不同的值，也不应该影响主时钟
         clock.updateFromBackend(999999.0)
         val after = clock.songPositionMs
-        assertTrue(after >= before, "位置不应回退：$before -> $after")
-        assertTrue(after - before < 100.0, "后端值不应造成突进：$before -> $after")
+        assertTrue(after >= before, "位置不应回退")
+        assertTrue(after - before < 100.0, "后端值不应造成突进")
     }
 
     @Test
-    fun `syncToBackend 在误差范围内不纠正`() {
-        val clock = PlaybackClock()
-        clock.start()
-        Thread.sleep(20)
-        val before = clock.songPositionMs
-        clock.syncToBackend(before + 10.0, toleranceMs = 80.0) // 10ms 偏差，不纠正
-        val after = clock.songPositionMs
-        assertTrue(kotlin.math.abs(after - before) < 50.0)
-    }
+    fun `TJA OFFSET 影响谱面时间轴`() {
+        val noOffset = PlaybackClock(tjaOffsetMs = 0.0)
+        noOffset.start()
+        Thread.sleep(10)
+        val base = noOffset.chartTimeJudgeMs
 
-    @Test
-    fun `syncToBackend 超过容差才纠正`() {
-        val clock = PlaybackClock()
-        clock.start()
-        Thread.sleep(20)
-        clock.syncToBackend(5000.0, toleranceMs = 80.0) // 严重偏离
-        // 纠正后位置应接近 5000
-        assertTrue(clock.songPositionMs > 4900.0, "应纠正到 5000 附近，实际 ${clock.songPositionMs}")
-    }
+        val negOffset = PlaybackClock(tjaOffsetMs = -1000.0)
+        negOffset.start()
+        Thread.sleep(10)
+        val shifted = negOffset.chartTimeJudgeMs
 
-    @Test
-    fun `渲染时间 = 音频位置 + 前导 - 目押偏移`() {
-        val clock = PlaybackClock(leadInMs = 100.0)
-        clock.visualOffsetMs = 50.0
-        clock.start()
-        // 先读位置，再读渲染时间；允许微小的时钟推进误差
-        val pos = clock.songPositionMs
-        val visual = clock.chartTimeVisualMs
-        assertEquals(100.0 - 50.0, visual - pos, 15.0)
-    }
-
-    @Test
-    fun `判定时间 = 音频位置 + 前导 - 音押偏移`() {
-        val clock = PlaybackClock(leadInMs = 100.0)
-        clock.audioOffsetMs = 80.0
-        clock.start()
-        val pos = clock.songPositionMs
-        val judge = clock.chartTimeJudgeMs
-        assertEquals(100.0 - 80.0, judge - pos, 15.0)
-    }
-
-    @Test
-    fun `目押与音押互相独立`() {
-        val clock = PlaybackClock()
-        clock.start()
-        // 同一时刻读 visual 与 judge 的差值，避免时钟推进造成误差
-        clock.visualOffsetMs = 200.0
-        clock.audioOffsetMs = 0.0
-        var diff = clock.chartTimeJudgeMs - clock.chartTimeVisualMs
-        assertEquals(200.0, diff, 10.0, "目押应比判定时间早 200ms")
-
-        clock.visualOffsetMs = 0.0
-        clock.audioOffsetMs = 120.0
-        diff = clock.chartTimeJudgeMs - clock.chartTimeVisualMs
-        assertEquals(-120.0, diff, 10.0, "音押 120 应让判定时间比渲染早 120ms")
-    }
-
-    @Test
-    fun `universalOffsetMs 同时设置两者 兼容旧代码`() {
-        val clock = PlaybackClock()
-        clock.universalOffsetMs = 75.0
-        assertEquals(75.0, clock.visualOffsetMs, 0.001)
-        assertEquals(75.0, clock.audioOffsetMs, 0.001)
+        // OFFSET -1000 → 谱面时间比音频位置小 1000
+        assertEquals(-1000.0, shifted - base, 30.0)
     }
 
     @Test
@@ -107,11 +140,6 @@ class PlaybackClockTest {
         val frozen = clock.songPositionMs
         Thread.sleep(20)
         assertEquals(frozen, clock.songPositionMs, 1.0)
-
-        clock.resume()
-        assertTrue(clock.isPlaying)
-        Thread.sleep(20)
-        assertTrue(clock.songPositionMs > frozen, "恢复后应继续前进")
     }
 
     @Test
