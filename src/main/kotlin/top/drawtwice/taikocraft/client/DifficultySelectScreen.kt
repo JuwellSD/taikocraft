@@ -11,6 +11,7 @@ import top.drawtwice.taikocraft.chart.TjaChartFile
 import top.drawtwice.taikocraft.chart.TjaParser
 import java.nio.file.Files
 import kotlin.io.path.extension
+import kotlin.io.path.name
 
 /**
  * 难度选择界面。

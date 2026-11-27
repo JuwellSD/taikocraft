@@ -43,7 +43,7 @@ data class KeyMapping(
         fun of(scheme: KeyScheme): KeyMapping = when (scheme) {
             KeyScheme.BEGINNER -> KeyMapping(leftDon = F, leftKa = D, rightDon = J, rightKa = K)
             KeyScheme.EXPERT -> KeyMapping(leftDon = F, leftKa = R, rightDon = J, rightKa = I)
-            KeyScheme.CUSTOM -> of(KeyScheme.BEGINNER)
+            KeyScheme.CUSTOM -> KeyMapping(leftDon = F, leftKa = D, rightDon = J, rightKa = K)
         }
 
         fun keyName(glfwKey: Int): String =

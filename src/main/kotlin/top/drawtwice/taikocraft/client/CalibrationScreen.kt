@@ -54,10 +54,10 @@ class CalibrationScreen(
         val since = now - lastPulse
         if (since in 0.0..600.0) {
             val t = (since / 600.0).toFloat()
-            val r = (50 + 30 * t).toInt()
-            val a = ((1f - t) * 255).toInt().coerceIn(0, 255) shl 24
-            drawDisc(g, width / 2, height / 2, r, a or 0xFFFFFF, 1)
-            drawDisc(g, width / 2, height / 2, r - 5, a or 0xFFE8453C, 1)
+            val r: Int = (50 + 30 * t).toInt()
+            val a: Int = ((1f - t) * 255).toInt().coerceIn(0, 255) shl 24
+            drawDisc(g, width / 2, height / 2, r, (a or 0xFFFFFF).toInt(), 1)
+            drawDisc(g, width / 2, height / 2, r - 5, (a or 0xFFE8453C).toInt(), 1)
         }
         drawDisc(g, width / 2, height / 2, 44, 0x50FFFFFF, 2)
 

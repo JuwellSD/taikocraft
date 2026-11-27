@@ -8,12 +8,12 @@ import net.neoforged.fml.event.lifecycle.FMLClientSetupEvent
 import net.neoforged.neoforge.client.event.ClientTickEvent
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent
 import net.neoforged.neoforge.common.NeoForge
-import net.minecraft.client.KeyMapping
+import net.minecraft.client.KeyMapping as McKeyMapping
 import com.mojang.blaze3d.platform.InputConstants
 import org.lwjgl.glfw.GLFW
 import top.drawtwice.taikocraft.TaikoCraft
 import top.drawtwice.taikocraft.chart.SongLibrary
-import top.drawtwice.taikocraft.client.input.KeyMapping as TaikoKeyMapping
+import top.drawtwice.taikocraft.client.input.KeyMapping
 import top.drawtwice.taikocraft.client.input.TaikoKeyConfig
 import java.nio.file.Files
 import java.util.Properties
@@ -32,7 +32,7 @@ class TaikoCraftClient(modEventBus: IEventBus) {
         var audioOffsetMs: Double = 0.0
             private set
 
-        val openMenuKey: KeyMapping = KeyMapping(
+        val openMenuKey: McKeyMapping = McKeyMapping(
             "key.taikocraft.open_menu",
             InputConstants.Type.KEYSYM,
             GLFW.GLFW_KEY_F8,
@@ -57,7 +57,7 @@ class TaikoCraftClient(modEventBus: IEventBus) {
                 audioOffsetMs = p.getProperty("audioOffsetMs")?.toDoubleOrNull() ?: 0.0
                 TaikoKeyConfig.scheme = top.drawtwice.taikocraft.client.input.KeyScheme
                     .fromName(p.getProperty("keyScheme"))
-                TaikoKeyConfig.mapping = TaikoKeyMapping(
+                TaikoKeyConfig.mapping = top.drawtwice.taikocraft.client.input.KeyMapping(
                     p.getProperty("key.leftDon")?.toIntOrNull() ?: 70,
                     p.getProperty("key.leftKa")?.toIntOrNull() ?: 68,
                     p.getProperty("key.rightDon")?.toIntOrNull() ?: 74,
