@@ -72,13 +72,13 @@ object NoteSkinManager {
         if (useTexture) {
             // 原版风格：Notes.png 的帧 0（咚）/ 帧 1（咔）
             val frame = if (isDon) 0 else 1
-            val size = (r * 2).toFloat()
+            val size = r * 2
             val ok = runCatching {
                 g.blit(
                     ORIGINAL_NOTES,
-                    (cx - r).toFloat(), (cy - r).toFloat(),
+                    cx - r, cy - r,
                     size, size,
-                    (frame * NOTES_FRAME_W).toFloat(), 0f,
+                    frame * NOTES_FRAME_W, 0,
                     NOTES_FRAME_W, NOTES_FRAME_H,
                     NOTES_FRAME_W * NOTES_FRAMES, NOTES_FRAME_H,
                 )
@@ -87,7 +87,7 @@ object NoteSkinManager {
             if (ok) return
         }
         // 回退：代码绘制
-        fallback(g, cx, cy, r, alpha, if (isDon) 0xFFE8453C.toInt() else 0xFF4FC3D9.toInt())
+        fallback(g, cx, cy, r, alpha)
     }
 
     /** 原版风格的连打条是否可用 */
