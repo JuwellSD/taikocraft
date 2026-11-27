@@ -206,12 +206,11 @@ object TexDraw {
         r: Float, gr: Float, b: Float, a: Float,
         draw: () -> Unit,
     ) {
-        val sys = com.mojang.blaze3d.systems.RenderSystem
-        sys.setShaderColor(r, gr, b, a)
+        com.mojang.blaze3d.systems.RenderSystem.setShaderColor(r, gr, b, a)
         try {
             draw()
         } finally {
-            sys.setShaderColor(1f, 1f, 1f, 1f)
+            com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1f, 1f, 1f, 1f)
         }
     }
 }

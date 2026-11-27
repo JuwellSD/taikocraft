@@ -24,7 +24,7 @@ import kotlin.math.roundToInt
  * - `2_Config/Calibration/BG.png`（1920×1080）
  * - `2_Config/Calibration/FG.png`（1920×1080，前景框）
  * - `FG_zh.png`（中文版前景）
- * - `5_Game/12_Lane/*` 轨道
+ * - `5_Game/12_Lane` 轨道
  * - `5_Game/6_Taiko/Base.png` / `Don.png` / `Ka.png` 鼓
  *
  * ## 三按钮（`buttonIndex`）

@@ -77,8 +77,9 @@ class PlaySession(
 
     fun start() {
         KeyInputBuffer.clear()
-        if (audioFile != null) {
-            runCatching { OpenAlPlayback.create(audioFile) }
+        val file = audioFile
+        if (file != null) {
+            runCatching { OpenAlPlayback.create(file) }
                 .onSuccess { playback = it }
                 .onFailure {
                     playbackError = "音频加载失败：${it.message}"
