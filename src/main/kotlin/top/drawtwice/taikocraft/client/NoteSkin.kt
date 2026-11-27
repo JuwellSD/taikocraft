@@ -14,7 +14,7 @@ import top.drawtwice.taikocraft.TaikoCraft
  * | [ORIGINAL] | OpenTaiko 默认皮肤贴图（Notes.png 精灵表） |
  *
  * ## 贴图来源与许可
- * `assets/taikocraft/textures/taiko/original/*.png` 来自
+ * `assets/taikocraft/textures/taiko/original/` 下的 PNG 来自
  * **OpenTaiko 默认皮肤**（`System/Open-World Memories/Graphics/5_Game/Notes Skin (Taiko)/1/`）。
  * OpenTaiko 本体为 MIT 许可；贴图归属见其 `System/Open-World Memories/README.txt`：
  * TJAPlayer3 Default skin / Freepik / cien (@CienpixeL) / PNG Egg (Non-commercial)。
