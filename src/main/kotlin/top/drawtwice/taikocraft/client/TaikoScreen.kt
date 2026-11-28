@@ -227,6 +227,20 @@ class TaikoScreen(
         }
     }
 
+    /**
+     * 气球。
+     *
+     * ## ⚠️ balloons.png 不是三段式（2026-11-28 修正）
+     * 实测像素后确认：`balloons.png` 的 7 列是**并列的独立图标**，不是「头/身/尾」：
+     * - 第 0 列：气球本体（竖长圆形）
+     * - 第 1、2 列：久寿玉
+     * - 第 3~6 列：导火索
+     *
+     * OpenTaiko `CActImplBalloon.cs` 里气球是**整体一个图标**贴在音符位置，
+     * 不会横向拉伸成条。之前我当成 rolls 的三段式画，所以变成一条拖长的橙色东西。
+     *
+     * 连打（rolls.png）才是真正的三段式，那边保持不变。
+     */
     private fun drawBalloons(g: GuiGraphics, now: Double) {
         val skin = NoteStyleManager.skin()
         for (b in session.chart.balloons) {
@@ -234,16 +248,22 @@ class TaikoScreen(
             if (b.player == 2 && !show2P) continue
             val y = if (b.player == 1) noteOriginY1P else noteOriginY2P
             val bpm = bpmAt(b.startMs)
-            drawSegment(
-                g, now, b.startMs, b.endMs,
-                skin.balloon, skin.balloonCols, 0, y, bpm,
+            val x = noteOriginX + (((b.startMs - now) * bpm / 240000.0) * interval).toInt()
+            if (x < noteOriginX - noteSize || x > width) continue
+
+            // 气球：整体图标，第 0 列
+            TexDraw.sub(
+                g, skin.balloon, x, y, noteSize, noteSize,
+                0, 0, skin.noteCell, skin.noteCell,
                 skin.balloonCols * skin.noteCell, skin.noteCell,
             )
+
+            // 剩余击打数
             val remain = (b.requiredHits - session.judge.balloonHitsOf(b)).coerceAtLeast(0)
-            val xm = noteOriginX + (((b.startMs + b.endMs) / 2 - now) * bpm / 240000.0 * interval).toInt()
-            if (xm in noteOriginX..width) {
-                g.drawCenteredString(font, remain.toString(), xm, y + noteSize / 2 - 4, 0xFFFFFFFF.toInt())
-            }
+            g.drawCenteredString(
+                font, remain.toString(),
+                x + noteSize / 2, y + noteSize / 2 - 4, 0xFFFFFFFF.toInt(),
+            )
         }
     }
 

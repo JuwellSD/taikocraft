@@ -179,9 +179,11 @@ class CalibrationScreen(
         g.drawString(font, "中位数偏移 : $median ms", x, y, 0xFF55FFFF.toInt()); y += lh
         g.drawString(font, "最小偏移   : $lowest ms", x, y, 0xFFFFFFFF.toInt()); y += lh
         g.drawString(font, "最大偏移   : $highest ms", x, y, 0xFFFFFFFF.toInt()); y += lh
-        g.drawString(font, "上次偏移   : $lastOffset ms", x, y, 0xFFFFFFFF.toInt()); y += lh
         g.drawString(font, "采样次数   : ${offsets.size}（无上限）", x, y, 0xFFFFFFFF.toInt()); y += lh
-        g.drawString(font, "当前偏移   : ${currentOffset(v)} ms", x, y, 0xFF88FF88.toInt())
+        g.drawString(font, "当前偏移   : ${currentOffset(v)} ms", x, y, 0xFF88FF88.toInt()); y += lh
+        // 明确写出「保存后会写入的音押值」，避免符号误解
+        val willSave = if (offsets.isEmpty()) manualAudio.toInt() else -median
+        g.drawString(font, "→ 保存为音押 $willSave ms", x, y, 0xFFFFD24A.toInt())
     }
 
     /** 手动微调区（坠尔要求：能手动调目押/音押） */
@@ -189,16 +191,15 @@ class CalibrationScreen(
         val x = (TaikoGameLayout.JUDGE_X * scale).toInt()
         val y = (TaikoGameLayout.JUDGE_Y * scale).toInt() + 96
         val lh = 12
-        g.drawString(font, "── 手动微调 ──", x, y, 0xFFAAAAAA.toInt())
+        g.drawString(font, "── 手动微调（, . 目押  ; ' 音押）──", x, y, 0xFFAAAAAA.toInt())
         g.drawString(
-            font, "目押 ${manualVisual.toInt()} ms   , / .", x, y + lh,
+            font, "目押 ${manualVisual.toInt()} ms", x, y + lh,
             0xFFFFD24A.toInt(),
         )
         g.drawString(
-            font, "音押 ${manualAudio.toInt()} ms   ; / '", x, y + lh * 2,
+            font, "音押 ${manualAudio.toInt()} ms", x, y + lh * 2,
             0xFF7FE87F.toInt(),
         )
-        g.drawString(font, "Shift = ×5", x, y + lh * 3, 0xFF777777.toInt())
     }
 
     private fun drawButtons(g: GuiGraphics) {
@@ -219,7 +220,9 @@ class CalibrationScreen(
     }
 
     override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
-        val step = if ((modifiers and 1) != 0) 25.0 else 5.0 // Shift = ×5
+        // GLFW 修饰键位：SHIFT=0x1, CONTROL=0x2, ALT=0x4, SUPER=0x8
+        // 默认 1ms 步进（坠尔说之前只能 20 倍率变化，说明 Shift 一直被误判为按下）
+        val step = if ((modifiers and 0x1) != 0) 10.0 else 1.0
 
         // 手动微调：, / . 目押，; / ' 音押
         when (keyCode) {
