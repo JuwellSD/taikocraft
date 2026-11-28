@@ -88,7 +88,7 @@ class TaikoScreen(
         noteOriginY1P = sx(TaikoGameLayout.SCROLL_FIELD_Y)
         noteOriginY2P = noteOriginY1P + sx(TaikoGameLayout.P2_DY)
         noteSize = sx(TaikoGameLayout.NOTES_SIZE)
-        interval = TaikoGameLayout.NOTES_INTERVAL * scale * TaikoGameLayout.SCROLL_MULTIPLIER
+        interval = (TaikoGameLayout.NOTES_INTERVAL * TaikoGameLayout.SCROLL_MULTIPLIER * scale).toFloat()
         laneX = sx(TaikoGameLayout.LANE_X)
         laneY1P = sx(TaikoGameLayout.LANE_Y)
         laneY2P = sx(TaikoGameLayout.LANE_Y + TaikoGameLayout.P2_DY)
