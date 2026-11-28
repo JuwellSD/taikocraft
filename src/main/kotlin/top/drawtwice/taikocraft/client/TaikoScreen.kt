@@ -7,6 +7,7 @@ import top.drawtwice.taikocraft.chart.BarLine
 import top.drawtwice.taikocraft.chart.Note
 import top.drawtwice.taikocraft.chart.NoteColor
 import top.drawtwice.taikocraft.judge.Judgment
+import top.drawtwice.taikocraft.judge.Side
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
