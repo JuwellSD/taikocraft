@@ -94,7 +94,7 @@ class SongSelectScreen(
             val song = songs[idx]
             val isSel = i == 0
 
-            val xpos = (ox + i * dx + if (isSel) selDiff else 0).toInt()
+            val xpos = (ox + i * dx + if (isSel) selDiff else 0f).toInt()
             val ypos = (oy + i * dy).toInt()
 
             // 选中条：绿色半透明带（layout: select_band_color 72,210,104 alpha 170）
