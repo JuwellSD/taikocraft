@@ -165,111 +165,84 @@ class TaikoScreen(
 
     // ================= 音符 =================
 
+    /**
+     * 绘制音符。
+     *
+     * ## 图层顺序：**左边盖住右边**
+     * 后画的会盖住先画的。所以要**从右往左**（时间从晚到早）画，
+     * 这样最左边的音符最后画、位于最上层 —— 与真实太鼓一致：
+     * 接近判定线的音符压住后面的音符。
+     */
     private fun drawNotes(g: GuiGraphics, now: Double, notes: List<Note>) {
         // 时间窗按最慢 BPM 算 → 慢音符不会被截掉
         val maxN4 = if (interval <= 0f) 0.0 else (width - noteOriginX) / interval.toDouble()
         val aheadMs = 240000.0 * maxN4 / minBpm.coerceAtLeast(1.0)
 
-        var i = lowerBound(notes, now - 250.0)
-        while (i < notes.size) {
-            val idx = i
+        val skin = NoteStyleManager.skin()
+        val first = lowerBound(notes, now - 250.0)
+
+        // 先找出范围内的上界（时间 > now+ahead 就停）
+        var last = first
+        while (last < notes.size && notes[last].timeMs <= now + aheadMs) last++
+
+        // ★ 从右往左画：索引大的（时间晚、位置靠右）先画，索引小的后画 → 左边在上
+        for (i in (last - 1) downTo first) {
             val n = notes[i]
-            if (n.timeMs > now + aheadMs) break
-            i++
             if (n.player == 2 && !show2P) continue
-            if (session.judge.isJudged(idx)) continue // 已打中：消失
+            if (session.judge.isJudged(i)) continue // 已打中：消失
 
             val d = n.timeMs - now
             val x = noteOriginX + (d * n.bpmAtNote / 240000.0 * interval).toInt()
-            // 每个音符单独判断是否还在屏幕内
             if (x > width || x < noteOriginX - noteSize) continue
 
             val y = if (n.player == 1) noteOriginY1P else noteOriginY2P
-
-            when (NoteStyleManager.current) {
-                NoteStyle.SIMPLE -> {
-                    // 简约风格：白边空心圆，代码绘制
-                    NoteStyleManager.drawSimpleNote(
-                        g, x + noteSize / 2, y + noteSize / 2, noteSize / 2,
-                        isDon = n.color == NoteColor.DON, big = n.big,
-                    )
-                }
-                NoteStyle.MC -> {
-                    val col = when {
-                        n.color == NoteColor.DON && n.big -> 2
-                        n.color == NoteColor.KA && n.big -> 3
-                        n.color == NoteColor.DON -> 0
-                        else -> 1
-                    }
-                    TexDraw.sub(
-                        g, NoteStyleManager.mcNotes, x, y, noteSize, noteSize,
-                        col * NoteStyleManager.MC_NOTE_CELL, 0,
-                        NoteStyleManager.MC_NOTE_CELL, NoteStyleManager.MC_NOTE_CELL,
-                        NoteStyleManager.MC_NOTES_W, NoteStyleManager.MC_NOTES_H,
-                    )
-                }
+            val col = when {
+                n.color == NoteColor.DON && n.big -> 2
+                n.color == NoteColor.KA && n.big -> 3
+                n.color == NoteColor.DON -> 0
+                else -> 1
             }
+            TexDraw.sub(
+                g, skin.notes, x, y, noteSize, noteSize,
+                col * skin.noteCell, 0, skin.noteCell, skin.noteCell,
+                skin.notesCols * skin.noteCell, skin.noteCell,
+            )
         }
     }
 
     // ================= 连打 / 气球 =================
 
     private fun drawRolls(g: GuiGraphics, now: Double) {
+        val skin = NoteStyleManager.skin()
         for (roll in session.chart.rolls) {
             if (roll.endMs < now - 300) continue
             if (roll.player == 2 && !show2P) continue
             val y = if (roll.player == 1) noteOriginY1P else noteOriginY2P
-            val bpm = bpmAt(roll.startMs)
-            when (NoteStyleManager.current) {
-                NoteStyle.SIMPLE -> {
-                    val left = noteOriginX + (((roll.startMs - now) * bpm / 240000.0) * interval).toInt()
-                    val right = noteOriginX + (((roll.endMs - now) * bpm / 240000.0) * interval).toInt()
-                    NoteStyleManager.drawSimpleRoll(
-                        g, max(left, noteOriginX), min(right + noteSize, width),
-                        y + noteSize / 2, noteSize * 2 / 3, roll.big,
-                    )
-                }
-                NoteStyle.MC -> drawSegment(
-                    g, now, roll.startMs, roll.endMs,
-                    NoteStyleManager.mcRolls, 6,
-                    if (roll.big) 1 else 0, y, bpm,
-                    NoteStyleManager.MC_ROLLS_W, NoteStyleManager.MC_ROLLS_H,
-                )
-            }
+            drawSegment(
+                g, now, roll.startMs, roll.endMs,
+                skin.rolls, skin.rollsCols,
+                if (roll.big) 1 else 0, y, bpmAt(roll.startMs),
+                skin.rollsCols * skin.noteCell, skin.noteCell,
+            )
         }
     }
 
     private fun drawBalloons(g: GuiGraphics, now: Double) {
+        val skin = NoteStyleManager.skin()
         for (b in session.chart.balloons) {
             if (b.endMs < now - 300) continue
             if (b.player == 2 && !show2P) continue
             val y = if (b.player == 1) noteOriginY1P else noteOriginY2P
             val bpm = bpmAt(b.startMs)
-            when (NoteStyleManager.current) {
-                NoteStyle.SIMPLE -> {
-                    val left = noteOriginX + (((b.startMs - now) * bpm / 240000.0) * interval).toInt()
-                    val right = noteOriginX + (((b.endMs - now) * bpm / 240000.0) * interval).toInt()
-                    NoteStyleManager.drawSimpleRoll(
-                        g, max(left, noteOriginX), min(right + noteSize, width),
-                        y + noteSize / 2, noteSize * 2 / 3, false,
-                    )
-                    val cx = ((max(left, noteOriginX) + min(right + noteSize, width)) / 2)
-                    NoteStyleManager.drawSimpleBalloon(g, cx, y + noteSize / 2, noteSize / 3)
-                    val remain = (b.requiredHits - session.judge.balloonHitsOf(b)).coerceAtLeast(0)
-                    g.drawCenteredString(font, remain.toString(), cx, y + noteSize / 2 - 4, 0xFF000000.toInt())
-                }
-                NoteStyle.MC -> {
-                    drawSegment(
-                        g, now, b.startMs, b.endMs,
-                        NoteStyleManager.mcBalloon, 3, 0, y, bpm,
-                        NoteStyleManager.MC_BALLOON_W, NoteStyleManager.MC_BALLOON_H,
-                    )
-                    val remain = (b.requiredHits - session.judge.balloonHitsOf(b)).coerceAtLeast(0)
-                    val xm = noteOriginX + (((b.startMs + b.endMs) / 2 - now) * bpm / 240000.0 * interval).toInt()
-                    if (xm in noteOriginX..width) {
-                        g.drawCenteredString(font, remain.toString(), xm, y + noteSize / 2 - 4, 0xFFFFFFFF.toInt())
-                    }
-                }
+            drawSegment(
+                g, now, b.startMs, b.endMs,
+                skin.balloon, skin.balloonCols, 0, y, bpm,
+                skin.balloonCols * skin.noteCell, skin.noteCell,
+            )
+            val remain = (b.requiredHits - session.judge.balloonHitsOf(b)).coerceAtLeast(0)
+            val xm = noteOriginX + (((b.startMs + b.endMs) / 2 - now) * bpm / 240000.0 * interval).toInt()
+            if (xm in noteOriginX..width) {
+                g.drawCenteredString(font, remain.toString(), xm, y + noteSize / 2 - 4, 0xFFFFFFFF.toInt())
             }
         }
     }
@@ -352,33 +325,26 @@ class TaikoScreen(
      * 紫色和白色的「0000」就是整张精灵表被压扁的结果。
      */
     private fun drawExplosions(g: GuiGraphics, judgeNow: Double) {
+        val skin = NoteStyleManager.skin()
         for (fx in session.hitFx) {
             val age = judgeNow - fx.startMs
-            if (age < 0 || age > TaikoGameTextures.EXPLOSION_MS) continue
-            val t = (age / TaikoGameTextures.EXPLOSION_MS).coerceIn(0.0, 0.9999)
+            if (age < 0 || age > NoteStyleManager.EXPLOSION_MS) continue
+            val t = (age / NoteStyleManager.EXPLOSION_MS).coerceIn(0.0, 0.9999)
             val cy = if (fx.player == 1) noteOriginY1P else noteOriginY2P
             val cx = noteOriginX + noteSize / 2
             val centerY = cy + noteSize / 2
 
-            when (NoteStyleManager.current) {
-                NoteStyle.SIMPLE -> {
-                    NoteStyleManager.drawSimpleExplosion(g, cx, centerY, t.toFloat(), fx.big)
-                }
-                NoteStyle.MC -> {
-                    val frame = (t * NoteStyleManager.MC_EXPLOSION_COLS).toInt()
-                        .coerceIn(0, NoteStyleManager.MC_EXPLOSION_COLS - 1)
-                    val row = if (fx.judgment == Judgment.PERFECT) 0 else 1
-                    val size = (noteSize * if (fx.big) 1.9f else 1.5f).toInt()
-                    TexDraw.sub(
-                        g, NoteStyleManager.mcExplosion,
-                        cx - size / 2, centerY - size / 2, size, size,
-                        frame * NoteStyleManager.MC_EXPLOSION_CELL,
-                        row * NoteStyleManager.MC_EXPLOSION_CELL,
-                        NoteStyleManager.MC_EXPLOSION_CELL, NoteStyleManager.MC_EXPLOSION_CELL,
-                        NoteStyleManager.MC_EXPLOSION_W, NoteStyleManager.MC_EXPLOSION_H,
-                    )
-                }
-            }
+            val frame = (t * skin.explosionCols).toInt().coerceIn(0, skin.explosionCols - 1)
+            val row = if (fx.judgment == Judgment.PERFECT) 0 else 1
+            val size = (noteSize * if (fx.big) 1.9f else 1.5f).toInt()
+            TexDraw.sub(
+                g, skin.explosion,
+                cx - size / 2, centerY - size / 2, size, size,
+                frame * skin.explosionCell, row * skin.explosionCell,
+                skin.explosionCell, skin.explosionCell,
+                skin.explosionCols * skin.explosionCell,
+                skin.explosionRows * skin.explosionCell,
+            )
         }
     }
 
@@ -420,7 +386,14 @@ class TaikoScreen(
             if (p.player != player) continue
             val age = (now - p.atNanos) / 1_000_000.0
             if (age < 0 || age > PAD_FADE_MS) continue
-            val level = (1.0 - age / PAD_FADE_MS).toFloat().coerceIn(0f, 1f)
+            // 用「先保持、后渐隐」的曲线：前 15% 满亮，之后按平方衰减
+            // 线性 1-t 在人眼里前段几乎看不出变化，看起来像突然消失
+            val t = (age / PAD_FADE_MS).coerceIn(0.0, 1.0)
+            val level = if (t < 0.15) 1.0
+            else {
+                val u = (t - 0.15) / 0.85
+                (1.0 - u) * (1.0 - u)
+            }
             // 0 左咔 / 1 右咔 / 2 左咚 / 3 右咚
             val idx = when {
                 p.color == NoteColor.KA && p.side == Side.LEFT -> 0
@@ -428,7 +401,7 @@ class TaikoScreen(
                 p.side == Side.LEFT -> 2
                 else -> 3
             }
-            if (level > bright[idx]) bright[idx] = level
+            if (level > bright[idx]) bright[idx] = level.toFloat()
         }
 
         // 鼓边（Ka）：区域 0 左、1 右
@@ -459,7 +432,7 @@ class TaikoScreen(
 
     private companion object {
         /** 平面太鼓渐隐时长（毫秒） */
-        const val PAD_FADE_MS = 400.0
+        const val PAD_FADE_MS = 550.0
     }
 
     // ================= 判定文字 / 调试 =================
