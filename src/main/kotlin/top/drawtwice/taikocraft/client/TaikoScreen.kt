@@ -71,7 +71,6 @@ class TaikoScreen(
         super.init()
         session.start()
     }
-    }
 
     override fun renderBackdrop(g: GuiGraphics) {
         g.fill(0, 0, width, height, 0xFF000000.toInt())
