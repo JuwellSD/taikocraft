@@ -86,8 +86,9 @@ object NoteStyleManager {
         notesCols = 6, noteCell = 195,
         rolls = tex("textures/taiko/mc/rolls.png"),
         rollsCols = 6,
+        // 气球每 2 格一组：0-1 气球 / 2-3 久寿玉 / 4-5 导火索
         balloon = tex("textures/taiko/mc/balloon.png"),
-        balloonCols = 3,
+        balloonCols = 6,
         explosion = tex("textures/taiko/mc/explosion.png"),
         explosionCols = 7, explosionRows = 2, explosionCell = 195,
     )
