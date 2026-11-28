@@ -24,6 +24,27 @@ class JudgeEngine(
     private val judged = BooleanArray(notes.size)
     private var advanceCursor = 0
     private val balloonHits = IntArray(balloons.size)
+
+    /**
+     * 气球状态（坠尔要求的行为）：
+     * - [BalloonState.IDLE] 还没到判定点，正在飞过来
+     * - [BalloonState.HELD] 到判定点停住，等玩家点击（或时间到飞走）
+     * - [BalloonState.POPPING] 玩家点够了，正在爆开
+     * - [BalloonState.FLED] 时间到没点够，飞走了
+     */
+    enum class BalloonState { IDLE, HELD, POPPING, FLED }
+
+    private val balloonStates = Array(balloons.size) { BalloonState.IDLE }
+    private val balloonPopAtMs = DoubleArray(balloons.size) { -1.0 }
+
+    fun balloonStateOf(i: Int): BalloonState =
+        if (i in balloonStates.indices) balloonStates[i] else BalloonState.IDLE
+
+    fun balloonPopAtOf(i: Int): Double =
+        if (i in balloonPopAtMs.indices) balloonPopAtMs[i] else -1.0
+
+    fun balloonIndexOf(b: BalloonSegment): Int = balloons.indexOf(b)
+
     private val pendingBig = HashMap<Int, PendingBig>()
     private val lastPressAt = HashMap<Side, Double>()
 
@@ -53,17 +74,28 @@ class JudgeEngine(
             )
         }
 
-        // 气球：加分但**不加连击**
-        balloons.firstOrNull { event.timeMs in it.startMs..it.endMs }?.let { b ->
-            val idx = balloons.indexOf(b)
-            if (idx >= 0 && balloonHits[idx] < b.requiredHits) {
-                balloonHits[idx]++
-                score += 100
-                return JudgeResult(
-                    Judgment.PERFECT, null, NoteColor.DON, false, fromRollOrBalloon = true,
-                    balloonHits = balloonHits[idx], balloonRequired = b.requiredHits,
-                    side = event.side, player = b.player,
-                )
+        // 气球：只在 HELD 状态（到达判定点后停住）才接受点击
+        run {
+            val bi = balloons.indexOfFirst { event.timeMs in it.startMs..it.endMs }
+            if (bi >= 0) {
+                val b = balloons[bi]
+                if (balloonStates[bi] == BalloonState.HELD) {
+                    if (balloonHits[bi] < b.requiredHits) {
+                        balloonHits[bi]++
+                        score += 100
+                        // 点够了 → 进入爆开状态
+                        if (balloonHits[bi] >= b.requiredHits) {
+                            balloonStates[bi] = BalloonState.POPPING
+                            balloonPopAtMs[bi] = event.timeMs
+                        }
+                        return JudgeResult(
+                            Judgment.PERFECT, null, NoteColor.DON, false, fromRollOrBalloon = true,
+                            balloonHits = balloonHits[bi], balloonRequired = b.requiredHits,
+                            side = event.side, player = b.player,
+                        )
+                    }
+                }
+                // IDLE / POPPING / FLED 状态下点击气球 -> 无反应（不消耗，不影响别的判定）
             }
         }
 
@@ -164,6 +196,24 @@ class JudgeEngine(
             judged[i] = true
             pendingBig.remove(i)
             combo = 0
+        }
+
+        // 气球状态迁移
+        for (i in balloons.indices) {
+            val b = balloons[i]
+            when (balloonStates[i]) {
+                BalloonState.IDLE ->
+                    // 到达判定点 → 停住等点击
+                    if (timeMs >= b.startMs) balloonStates[i] = BalloonState.HELD
+                BalloonState.HELD ->
+                    // 时间到还没点够 → 飞走（一下没点也一样）
+                    if (timeMs > b.endMs) balloonStates[i] = BalloonState.FLED
+                BalloonState.POPPING -> {
+                    // 爆开动画 500ms 后结束
+                    if (timeMs > balloonPopAtMs[i] + 500.0) balloonStates[i] = BalloonState.FLED
+                }
+                BalloonState.FLED -> { /* 终态 */ }
+            }
         }
     }
 

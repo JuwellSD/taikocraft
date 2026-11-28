@@ -31,7 +31,15 @@ data class RollSegment(
     val durationMs: Double get() = endMs - startMs
 }
 
-/** 气球（TJA 7/9 起、8 止；osu Spinner） */
+/**
+ * 气球（TJA 7/9 起、8 止；osu Spinner）。
+ *
+ * ## 行为（坠尔要求，符合太鼓原版）
+ * 1. 气球音符到达判定点后**停住**不动
+ * 2. 玩家点击 → 开始计数，气球逐渐鼓胀
+ * 3. 点够 [requiredHits] → **爆开**
+ * 4. 时间到还没点够 → **飞走**（点都没点也一样，时间到就消失）
+ */
 data class BalloonSegment(
     val startMs: Double,
     val endMs: Double,

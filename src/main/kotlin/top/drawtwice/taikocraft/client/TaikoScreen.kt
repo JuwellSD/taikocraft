@@ -6,6 +6,7 @@ import net.minecraft.network.chat.Component
 import top.drawtwice.taikocraft.chart.BarLine
 import top.drawtwice.taikocraft.chart.Note
 import top.drawtwice.taikocraft.chart.NoteColor
+import top.drawtwice.taikocraft.judge.JudgeEngine
 import top.drawtwice.taikocraft.judge.Judgment
 import top.drawtwice.taikocraft.judge.Side
 import kotlin.math.abs
@@ -230,40 +231,77 @@ class TaikoScreen(
     /**
      * 气球。
      *
-     * ## ⚠️ balloons.png 不是三段式（2026-11-28 修正）
-     * 实测像素后确认：`balloons.png` 的 7 列是**并列的独立图标**，不是「头/身/尾」：
-     * - 第 0 列：气球本体（竖长圆形）
-     * - 第 1、2 列：久寿玉
-     * - 第 3~6 列：导火索
+     * ## 贴图结构（实测）
+     * `balloons.png` 每 **2 格一组**（390px 宽）：
+     * - 第 0-1 格：气球本体（左圆球 + 右拖尾，宽 268px）
+     * - 第 2-3 格：久寿玉
+     * - 第 4-6 格：导火索
      *
-     * OpenTaiko `CActImplBalloon.cs` 里气球是**整体一个图标**贴在音符位置，
-     * 不会横向拉伸成条。之前我当成 rolls 的三段式画，所以变成一条拖长的橙色东西。
+     * 所以气球要画**两格宽**，右边那段拖尾才是「物件右边连着的气球」。
      *
-     * 连打（rolls.png）才是真正的三段式，那边保持不变。
+     * ## 行为（坠尔要求 + 太鼓原版）
+     * 1. 飞过来 → 到判定点**停住**
+     * 2. 玩家点击 → 计数增加、气球逐渐鼓胀
+     * 3. 点够 → **爆开**
+     * 4. 时间到没点够 → **飞走**（一下没点也一样）
      */
     private fun drawBalloons(g: GuiGraphics, now: Double) {
         val skin = NoteStyleManager.skin()
-        for (b in session.chart.balloons) {
-            if (b.endMs < now - 300) continue
+        for ((i, b) in session.chart.balloons.withIndex()) {
             if (b.player == 2 && !show2P) continue
+            val state = session.judge.balloonStateOf(i)
+            if (state == JudgeEngine.BalloonState.FLED) continue
+
             val y = if (b.player == 1) noteOriginY1P else noteOriginY2P
             val bpm = bpmAt(b.startMs)
-            val x = noteOriginX + (((b.startMs - now) * bpm / 240000.0) * interval).toInt()
-            if (x < noteOriginX - noteSize || x > width) continue
 
-            // 气球：整体图标，第 0 列
-            TexDraw.sub(
-                g, skin.balloon, x, y, noteSize, noteSize,
-                0, 0, skin.noteCell, skin.noteCell,
-                skin.balloonCols * skin.noteCell, skin.noteCell,
-            )
+            // 位置：
+            // - IDLE：跟着时间飞过来
+            // - HELD / POPPING：**停在判定点不动**
+            val x = if (state == JudgeEngine.BalloonState.IDLE) {
+                noteOriginX + (((b.startMs - now) * bpm / 240000.0) * interval).toInt()
+            } else {
+                noteOriginX
+            }
+            if (x < noteOriginX - noteSize * 2 || x > width) continue
 
-            // 剩余击打数
-            val remain = (b.requiredHits - session.judge.balloonHitsOf(b)).coerceAtLeast(0)
-            g.drawCenteredString(
-                font, remain.toString(),
-                x + noteSize / 2, y + noteSize / 2 - 4, 0xFFFFFFFF.toInt(),
-            )
+            // 气球占 2 格宽（拖动区 + 拖尾）
+            val balloonW = noteSize * 2
+
+            when (state) {
+                JudgeEngine.BalloonState.POPPING -> {
+                    // 爆开：向外扩散并淡出
+                    val age = now - session.judge.balloonPopAtOf(i)
+                    val t = (age / 500.0).coerceIn(0.0, 1.0).toFloat()
+                    val scale = 1f + t * 0.6f
+                    val alpha = (1f - t).coerceIn(0f, 1f)
+                    TexDraw.tinted(g, 1f, 1f, 1f, alpha) {
+                        TexDraw.sub(
+                            g, skin.balloon,
+                            x, y - (noteSize * (scale - 1) / 2).toInt(),
+                            (balloonW * scale).toInt(), (noteSize * scale).toInt(),
+                            0, 0, skin.noteCell * 2, skin.noteCell,
+                            skin.balloonCols * skin.noteCell, skin.noteCell,
+                        )
+                    }
+                }
+                else -> {
+                    // 正常 / 停住待打：绘制 2 格宽的气球
+                    TexDraw.sub(
+                        g, skin.balloon, x, y, balloonW, noteSize,
+                        0, 0, skin.noteCell * 2, skin.noteCell,
+                        skin.balloonCols * skin.noteCell, skin.noteCell,
+                    )
+                    // 剩余击打数（只在停住时显示）
+                    if (state == JudgeEngine.BalloonState.HELD) {
+                        val remain = (b.requiredHits - session.judge.balloonHitsOf(b)).coerceAtLeast(0)
+                        g.drawCenteredString(
+                            font, remain.toString(),
+                            x + noteSize, y + noteSize / 2 - 4, 0xFFFFFFFF.toInt(),
+                        )
+                    }
+                }
+            }
         }
     }
 
