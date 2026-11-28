@@ -145,7 +145,8 @@ class PlaySession(
     private fun recordResult(r: JudgeResult, atMs: Double) {
         lastResult = r
         lastResultAtMs = atMs
-        if (r.judgment != Judgment.MISS) {
+        // 只对「良/可」生成爆开特效；不可不画（OpenTaiko 同行为）
+        if (r.judgment == Judgment.PERFECT || r.judgment == Judgment.GOOD) {
             _hitFx += HitFx(atMs, r.color, r.big, r.judgment, r.player, r.side)
         }
     }

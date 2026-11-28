@@ -132,8 +132,14 @@ object TaikoGameTextures {
     const val BALLOON_COLS = 7
 
     // ---- 打击特效 ----
+    // explosion.png: 2730×780 = 7 列 × 2 行，每格 390×390
+    // 行序：第 0 行 = 良（紫），第 1 行 = 可（白）
     val explosion = tex("original/hit/explosion.png")
-    val explosionBig = tex("original/hit/explosion_big.png")
+    const val EXPLOSION_COLS = 7
+    const val EXPLOSION_ROWS = 2
+    const val EXPLOSION_CELL = 390
+    /** 特效总时长（毫秒），7 帧均分 */
+    const val EXPLOSION_MS = 210.0
 
     // ---- 血条 ----
     val gaugeBase = tex("opentaiko/gauge_base.png")

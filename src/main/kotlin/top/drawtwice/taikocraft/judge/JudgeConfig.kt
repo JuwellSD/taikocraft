@@ -25,6 +25,8 @@ data class JudgeResult(
     val side: Side = Side.LEFT,
     /** 第几玩家（供平面太鼓高亮） */
     val player: Int = 1,
+    /** 是否因为打错颜色被判不可 */
+    val wrongColor: Boolean = false,
 )
 
 /**

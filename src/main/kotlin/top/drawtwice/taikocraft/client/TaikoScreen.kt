@@ -245,7 +245,12 @@ class TaikoScreen(
     /**
      * 画「头 + 身 + 尾」。
      *
-     * `rolls.png` / `balloons.png` 是每 3 列一组：`[头, 身, 尾]`，第 n 组起始列 = n×3。
+     * `rolls.png` / `balloons.png` 每 3 列一组：`[头, 身, 尾]`，第 n 组起始列 = n×3。
+     *
+     * ## 关键：身和尾必须**拉伸**，不能平铺
+     * 贴图的身列是左右无留白的纯色带，尾列是左端圆角、右端平齐。
+     * 所以身体是一整段被水平拉伸的，尾部单独贴在末端 —— 平铺会看到
+     * 一格一格的接缝（坠尔截图里那条「一段一段」的长条）。
      */
     private fun drawSegment(
         g: GuiGraphics,
@@ -265,7 +270,7 @@ class TaikoScreen(
         val tailCol = headCol + 2
         val texW = cols * 195
 
-        // 身（先画，被头尾盖住两端）
+        // 身：从头部**中心**到尾部，拉伸
         val bodyLeft = max(headX + noteSize / 2, noteOriginX)
         val bodyRight = min(tailX + noteSize / 2, width)
         if (bodyRight > bodyLeft) {
@@ -278,7 +283,7 @@ class TaikoScreen(
         if (headX > noteOriginX - noteSize && headX < width) {
             TexDraw.sub(g, tex, headX, y, noteSize, noteSize, headCol * 195, 0, 195, 195, texW, 195)
         }
-        // 尾
+        // 尾（贴一次，不再重复）
         if (tailX > noteOriginX - noteSize && tailX < width) {
             TexDraw.sub(g, tex, tailX, y, noteSize, noteSize, tailCol * 195, 0, 195, 195, texW, 195)
         }
@@ -300,67 +305,98 @@ class TaikoScreen(
 
     // ================= 打击特效 =================
 
+    /**
+     * 打击特效。
+     *
+     * `explosion.png` 是 **7 列 × 2 行**的精灵表（每格 390×390）：
+     * - 第 0 行 = 良（紫）
+     * - 第 1 行 = 可（白）
+     * - 不可 **不画特效**（OpenTaiko `CActImplFireworks.cs:184` 的 Miss/Bad 分支是空的）
+     *
+     * 旧实现把整张 2730×780 压进一个音符方形里 —— 屏幕上那团
+     * 紫色和白色的「0000」就是整张精灵表被压扁的结果。
+     */
     private fun drawExplosions(g: GuiGraphics, judgeNow: Double) {
         for (fx in session.hitFx) {
             val age = judgeNow - fx.startMs
-            if (age < 0 || age > 180) continue
-            val t = (age / 180.0).coerceIn(0.0, 1.0)
-            val size = (noteSize * (1.0 + t * 0.7)).toInt()
-            val alpha = ((1.0 - t) * 0.9).toFloat()
+            if (age < 0 || age > TaikoGameTextures.EXPLOSION_MS) continue
+            val t = (age / TaikoGameTextures.EXPLOSION_MS).coerceIn(0.0, 0.9999)
+            val frame = (t * TaikoGameTextures.EXPLOSION_COLS).toInt()
+                .coerceIn(0, TaikoGameTextures.EXPLOSION_COLS - 1)
+            val row = if (fx.judgment == Judgment.PERFECT) 0 else 1
+            // 大音符特效放大一点
+            val size = (noteSize * if (fx.big) 1.9f else 1.5f).toInt()
             val cy = if (fx.player == 1) noteOriginY1P else noteOriginY2P
             val x = noteOriginX + noteSize / 2 - size / 2
             val y = cy + noteSize / 2 - size / 2
-            TexDraw.tinted(g, 1f, 1f, 1f, alpha) {
-                TexDraw.full(
-                    g,
-                    if (fx.big) TaikoGameTextures.explosionBig else TaikoGameTextures.explosion,
-                    x, y, size, size, 195, 195,
-                )
-            }
+            TexDraw.sub(
+                g, TaikoGameTextures.explosion, x, y, size, size,
+                frame * TaikoGameTextures.EXPLOSION_CELL,
+                row * TaikoGameTextures.EXPLOSION_CELL,
+                TaikoGameTextures.EXPLOSION_CELL, TaikoGameTextures.EXPLOSION_CELL,
+                TaikoGameTextures.EXPLOSION_COLS * TaikoGameTextures.EXPLOSION_CELL,
+                TaikoGameTextures.EXPLOSION_ROWS * TaikoGameTextures.EXPLOSION_CELL,
+            )
         }
     }
 
     // ================= 左侧平面太鼓（四个判定区）=================
 
     /**
-     * OpenTaiko `CActImplMtaiko.Draw()` 顺序：
-     * 1. `Base.png` 打底（鼓身）
-     * 2. `Ka.png` 左半 / 右半（鼓边 = 外圈）
-     * 3. `Don.png` 左半 / 右半（鼓面 = 内圈）
+     * 左侧平面太鼓（**四个判定区**）。
      *
-     * 不透明度 = `brightness × 73 / 255`，brightness 每次击打置 8、每 20ms −1。
-     * 图片本身决定鼓边粗细 —— 所以是原版的细边。
+     * ## 贴图结构（实测像素 alpha）
+     * - `don.png`（180×200）：**实心圆**，alpha 集中在核心 r<40 → 鼓面
+     * - `ka.png`（180×200）：**中空环**，alpha 集中在外环 60~85，中心透明 → 鼓边
+     *
+     * ## 四区怎么来的
+     * OpenTaiko `CActImplMtaiko.cs:407-420` 把左右两半分别贴在原位置：
+     * ```
+     * Ka_Left .t2DDraw(taiko_x,        taiko_y, rect(0,   0, W/2, H))
+     * Ka_Right.t2DDraw(taiko_x + W/2,  taiko_y, rect(W/2, 0, W/2, H))
+     * ```
+     * 两次拼起来正好是整张图 —— 所以画面是完整的鼓，而
+     * **左半边亮 = 左手、右半边亮 = 右手**，区域天然分开。
+     *
+     * 之前我按左右各切一半**缩放**贴上去，把环形压扁了 →
+     * 整块鼓面被染成青色（坠尔截图里的「鼓边太厚」）。
+     *
+     * ## 亮度
+     * `nBrightness` 每次击打置 8，每 20ms 减 1；不透明度 = `brightness × 73 / 255`。
      */
     private fun drawFlatDrum(g: GuiGraphics, player: Int) {
         val ox = sx(TaikoGameLayout.TAIKO_X)
         val oy = sx(TaikoGameLayout.TAIKO_Y + TaikoGameLayout.playerYOffset(player))
         val w = sx(180)
         val h = sx(200)
+        val halfW = w / 2
         val base = (player - 1) * 4
 
         TexDraw.full(g, TaikoGameTextures.drumBase, ox, oy, w, h, 180, 200)
 
-        val half = w / 2
-        // 鼓边（Ka）：0 左、1 右
+        // 鼓边（Ka）：区域 0 左、1 右
         for (i in 0..1) {
             val b = padBrightness[base + i]
             if (b <= 0) continue
             val a = min(1f, b * 73 / 255f)
             TexDraw.tinted(g, 1f, 1f, 1f, a) {
+                // 左半画贴图左半（u=0），右半画贴图右半（u=90），位置紧接 —— 拼回整张
                 TexDraw.sub(
-                    g, TaikoGameTextures.drumKa, ox + i * half, oy, half, h,
+                    g, TaikoGameTextures.drumKa,
+                    ox + i * halfW, oy, halfW, h,
                     i * 90, 0, 90, 200, 180, 200,
                 )
             }
         }
-        // 鼓面（Don）：2 左、3 右
+        // 鼓面（Don）：区域 2 左、3 右
         for (i in 0..1) {
             val b = padBrightness[base + 2 + i]
             if (b <= 0) continue
             val a = min(1f, b * 73 / 255f)
             TexDraw.tinted(g, 1f, 1f, 1f, a) {
                 TexDraw.sub(
-                    g, TaikoGameTextures.drumDon, ox + i * half, oy, half, h,
+                    g, TaikoGameTextures.drumDon,
+                    ox + i * halfW, oy, halfW, h,
                     i * 90, 0, 90, 200, 180, 200,
                 )
             }

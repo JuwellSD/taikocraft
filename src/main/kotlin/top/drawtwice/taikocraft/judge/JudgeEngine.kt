@@ -66,7 +66,23 @@ class JudgeEngine(
             }
         }
 
-        val best = findBest(event.timeMs) ?: return null
+        // 只匹配**同色**音符。打错颜色 → 该音符判不可并断连击
+        // （OpenTaiko `CStagePlayDrumsScreen.cs:1139`：IsExpectedPadAnyHit 不通过即判 Miss）
+        val best = findBest(event.timeMs, event.color)
+        if (best == null) {
+            val wrong = findWrongColor(event.timeMs, event.color)
+            if (wrong != null) {
+                judged[wrong] = true
+                val note = notes[wrong]
+                val r = JudgeResult(
+                    Judgment.POOR, note.timeMs, note.color, note.big, bigCompleted = false,
+                    side = event.side, player = note.player, wrongColor = true,
+                )
+                register(r, note)
+                return r
+            }
+            return null
+        }
         val (idx, delta) = best
         val note = notes[idx]
         val d = abs(delta)
@@ -103,20 +119,43 @@ class JudgeEngine(
         return null
     }
 
-    private fun findBest(timeMs: Double): Pair<Int, Double>? {
+    /** 在判定窗口内找最近的**同色**未判定音符 */
+    private fun findBest(timeMs: Double, color: NoteColor): Pair<Int, Double>? {
         var bestIdx = -1
         var bestDelta = Double.MAX_VALUE
         var i = lowerBound(timeMs - config.poorMs)
         while (i < notes.size) {
             val n = notes[i]
             if (n.timeMs > timeMs + config.poorMs) break
-            if (!judged[i]) {
+            if (!judged[i] && n.color == color) {
                 val d = timeMs - n.timeMs
                 if (abs(d) < abs(bestDelta)) { bestDelta = d; bestIdx = i }
             }
             i++
         }
         return if (bestIdx < 0) null else bestIdx to bestDelta
+    }
+
+    /**
+     * 找判定窗口内最近的**异色**未判定音符 —— 用于「打错颜色」惩罚。
+     *
+     * 真实太鼓达人：咚音符打了咔 → 音符消失并判「不可」，断连击。
+     * 只惩罚**足够近**的异色音符（用 poorMs 窗口），远处的空打不惩罚。
+     */
+    private fun findWrongColor(timeMs: Double, color: NoteColor): Int? {
+        var bestIdx = -1
+        var bestDelta = Double.MAX_VALUE
+        var i = lowerBound(timeMs - config.poorMs)
+        while (i < notes.size) {
+            val n = notes[i]
+            if (n.timeMs > timeMs + config.poorMs) break
+            if (!judged[i] && n.color != color) {
+                val d = abs(timeMs - n.timeMs)
+                if (d < bestDelta) { bestDelta = d; bestIdx = i }
+            }
+            i++
+        }
+        return if (bestIdx < 0) null else bestIdx
     }
 
     private fun lowerBound(target: Double): Int {
@@ -144,13 +183,11 @@ class JudgeEngine(
         when (r.judgment) {
             Judgment.PERFECT -> {
                 combo++
-                score += when {
-                    note.big && r.bigCompleted -> 600
-                    else -> 300
-                }
+                score += if (note.big && r.bigCompleted) 600 else 300
             }
             Judgment.GOOD -> { combo++; score += if (note.big) 200 else 100 }
-            Judgment.POOR -> { combo++; score += if (note.big) 100 else 50 }
+            // 不可（含打错颜色）→ **断连击**，与 OpenTaiko 一致
+            Judgment.POOR -> { combo = 0; score += if (note.big) 100 else 50 }
             Judgment.MISS -> combo = 0
         }
         maxCombo = maxOf(maxCombo, combo)
