@@ -104,7 +104,7 @@ class SongSelectScreen(
         // ---- 底部提示 ----
         val hintY = height - 40
         g.drawString(
-            font, "↑↓ 选择    Enter 开始    C 延迟校准    ESC 返回",
+            font, "↑↓ 选择    Enter 开始    C 延迟校准    T 音符风格    ESC 返回",
             20, hintY, 0xFF888888.toInt(),
         )
         if (songs.isNotEmpty()) {
@@ -116,8 +116,14 @@ class SongSelectScreen(
             "目押 ${TaikoCraftClient.visualOffsetMs.toInt()} ms    音押 ${TaikoCraftClient.audioOffsetMs.toInt()} ms",
             20, hintY - 40, 0xFF7FE87F.toInt(),
         )
+        // 音符风格
+        g.drawString(
+            font,
+            "音符风格：${NoteStyleManager.current.displayName}    T 切换",
+            20, hintY - 60, 0xFF7FC8E8.toInt(),
+        )
         if (status.isNotEmpty()) {
-            g.drawString(font, status, 20, hintY - 60, 0xFFFF6666.toInt())
+            g.drawString(font, status, 20, hintY - 80, 0xFFFF6666.toInt())
         }
     }
 
@@ -128,6 +134,11 @@ class SongSelectScreen(
             257, 335 -> { startSelected(); return true }                       // ENTER
             67 -> {                                                            // C：延迟校准
                 minecraft?.setScreen(CalibrationScreen(this))
+                return true
+            }
+            84 -> {                                                            // T：切换音符风格
+                val next = if (NoteStyleManager.current == NoteStyle.SIMPLE) NoteStyle.MC else NoteStyle.SIMPLE
+                TaikoCraftClient.setNoteStyle(next)
                 return true
             }
             256 -> { minecraft?.setScreen(previous); return true }             // ESC

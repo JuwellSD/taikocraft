@@ -53,8 +53,28 @@ class PlaySession(
         val side: Side,
     )
 
+    /**
+     * 一次**实际按键**（与是否命中音符无关）。
+     *
+     * 左侧平面太鼓的高亮**只看这个** —— 玩家敲了什么就亮什么，
+     * 没敲到音符也亮，敲错颜色也亮。这才是「键位示意」的正确语义。
+     *
+     * @param atNanos 系统时钟（`System.nanoTime()`），用于渐隐，
+     *                不能用谱面时间（暂停时会跟着停）
+     */
+    data class PadPress(
+        val color: NoteColor,
+        val side: Side,
+        val player: Int,
+        val atNanos: Long,
+    )
+
     private val _hitFx = mutableListOf<HitFx>()
     val hitFx: List<HitFx> get() = _hitFx
+
+    /** 最近 400ms 内的实际按键，供平面太鼓渐隐高亮 */
+    private val _padPresses = mutableListOf<PadPress>()
+    val padPresses: List<PadPress> get() = _padPresses
 
     private var anchorNano = 0L
     private var anchorJudge = 0.0
@@ -98,6 +118,8 @@ class PlaySession(
         playback?.stop()
         playback = null
         KeyInputBuffer.clear()
+        _padPresses.clear()
+        _hitFx.clear()
     }
 
     fun tick() {
@@ -113,6 +135,9 @@ class PlaySession(
         anchorJudge = clock.chartTimeJudgeMs
 
         for (hit in KeyInputBuffer.drain()) {
+            // ★ 先记录「玩家按了什么」——与判定结果无关
+            _padPresses += PadPress(hit.color, hit.side, 1, hit.nanoTime)
+
             val delta = (hit.nanoTime - anchorNano) / 1_000_000.0
             val judgeTime = anchorJudge + delta
             judge.press(InputEvent(hit.color, hit.side, judgeTime))?.let {
@@ -140,6 +165,10 @@ class PlaySession(
 
         val cutoff = clock.chartTimeJudgeMs - 1000.0
         _hitFx.removeAll { it.startMs < cutoff }
+
+        // 平面太鼓渐隐：清掉 400ms 前的按键记录
+        val nowNano = System.nanoTime()
+        _padPresses.removeAll { nowNano - it.atNanos > 400_000_000L }
     }
 
     private fun recordResult(r: JudgeResult, atMs: Double) {

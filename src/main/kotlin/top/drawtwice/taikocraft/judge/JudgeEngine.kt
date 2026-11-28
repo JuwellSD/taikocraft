@@ -66,23 +66,11 @@ class JudgeEngine(
             }
         }
 
-        // 只匹配**同色**音符。打错颜色 → 该音符判不可并断连击
-        // （OpenTaiko `CStagePlayDrumsScreen.cs:1139`：IsExpectedPadAnyHit 不通过即判 Miss）
-        val best = findBest(event.timeMs, event.color)
-        if (best == null) {
-            val wrong = findWrongColor(event.timeMs, event.color)
-            if (wrong != null) {
-                judged[wrong] = true
-                val note = notes[wrong]
-                val r = JudgeResult(
-                    Judgment.POOR, note.timeMs, note.color, note.big, bigCompleted = false,
-                    side = event.side, player = note.player, wrongColor = true,
-                )
-                register(r, note)
-                return r
-            }
-            return null
-        }
+        // 只匹配**同色**音符。
+        // 打错颜色 = **完全无反应**（音符不动、不判、不断连击）——
+        // 这是太鼓达人原版行为。OpenTaiko 有「严格模式」会把错色判不可，
+        // 此项留待设置里将来加开关。
+        val best = findBest(event.timeMs, event.color) ?: return null
         val (idx, delta) = best
         val note = notes[idx]
         val d = abs(delta)
@@ -137,11 +125,10 @@ class JudgeEngine(
     }
 
     /**
-     * 找判定窗口内最近的**异色**未判定音符 —— 用于「打错颜色」惩罚。
-     *
-     * 真实太鼓达人：咚音符打了咔 → 音符消失并判「不可」，断连击。
-     * 只惩罚**足够近**的异色音符（用 poorMs 窗口），远处的空打不惩罚。
+     * 找判定窗口内最近的**异色**未判定音符 —— 保留给将来的「严格模式」使用。
+     * 默认不启用：打错色应当完全无反应。
      */
+    @Suppress("unused")
     private fun findWrongColor(timeMs: Double, color: NoteColor): Int? {
         var bestIdx = -1
         var bestDelta = Double.MAX_VALUE

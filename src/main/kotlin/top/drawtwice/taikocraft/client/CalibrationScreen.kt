@@ -7,34 +7,31 @@ import top.drawtwice.taikocraft.TaikoCraft
 import top.drawtwice.taikocraft.audio.ClickTrack
 import top.drawtwice.taikocraft.audio.OpenAlPlayback
 import top.drawtwice.taikocraft.client.input.KeyInputBuffer
-import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /**
- * 延迟校准 —— 按 OpenTaiko `CActCalibrationMode.cs` 复刻。
+ * 延迟校准 —— 按 OpenTaiko `CActCalibrationMode.cs` 复刻，外加手动微调。
  *
  * ## 时钟（2026-11-28 关键修复）
  * 坠尔实测：**跟音乐点 = -130ms，跟画面点 = +100ms**，差 230ms。
- * 根因是旧实现里声音用 `MetronomeSound`（每次 `alBufferData` 现敲 + `alSourcePlay`），
- * 画面用 `System.nanoTime()` —— 两条独立时间源，声卡缓冲的 230ms 完全没算进去。
+ * 根因是旧实现里声音用 `MetronomeSound`（每次 `alBufferData` 现敲），
+ * 画面用 `System.nanoTime()` —— 两条独立时间源。
  *
  * 现在：**整段节拍预合成成一条音轨**（[ClickTrack]），交给 [OpenAlPlayback]，
- * 画面位置**直接读 `playback.positionMs()`**。声音和画面共用同一个时间源，
- * 不可能再出现系统性偏差 —— 跟音乐点和跟画面点会得到同一个数值。
+ * 画面位置**直接读 `playback.positionMs()`**。
+ *
+ * ## 手动微调（坠尔要求）
+ * `,` / `.` 调目押，`;` / `'` 调音押，每按一次 ±5ms，`Shift` 加速 ×5。
+ * 数值实时显示，立刻生效。
  *
  * ## OpenTaiko 原逻辑
  * ```
  * CalibrateTick = new CCounter(0, 500, 1, Timer)   // 0..500ms 循环
  * CurrentOffset = -(value > 250 ? value - 500 : value)   // 折到 ±250
  * ```
- * 屏幕上是一条横向滚动带：`Bar.png`（小节线）+ `Notes.png` 的咚音符，
- * 以 500ms 周期滚过判定圈。音符压到判定圈的瞬间敲鼓即为 0 偏差。
  *
  * ## 三按钮
  * 0 = 取消 / 1 = 打点 / 2 = 保存，左右方向键切换。
- *
- * ## 无采样上限
- * 坠尔要求：取消 16 次限制，想敲多少次都行。
  */
 class CalibrationScreen(
     private val previous: Screen? = null,
@@ -52,14 +49,23 @@ class CalibrationScreen(
     private var lastOffset = 0
     private var buttonIndex = 1
 
+    /** 手动微调的**工作副本**（保存时才写入 settings） */
+    private var manualVisual = 0.0
+    private var manualAudio = 0.0
+
     private var scale = 1f
 
     override fun init() {
+        manualVisual = TaikoCraftClient.visualOffsetMs
+        manualAudio = TaikoCraftClient.audioOffsetMs
         runCatching { OpenAlPlayback.createFrom(ClickTrack.build()) }
             .onSuccess {
                 playback = it
                 it.setVolume(1f)
                 it.play()
+                TaikoCraft.LOGGER.info(
+                    "校准节拍音就绪：{}ms，{} 帧", ClickTrack.durationMs, ClickTrack.durationMs,
+                )
             }
             .onFailure {
                 loadError = "节拍音初始化失败：${it.message}"
@@ -75,17 +81,28 @@ class CalibrationScreen(
 
     /** **唯一时钟**：音频后端真实播放位置（毫秒，已含循环累加） */
     private fun nowMs(): Double {
-        val p = playback ?: return 0.0
+        val p = playback ?: return fallbackNanos()
         if (p.tick()) {
             // 播完一轮 → 重开，累加位置保证单调
             loopCount++
+            val base = loopCount.toDouble() * ClickTrack.durationMs
             p.stop()
             runCatching { OpenAlPlayback.createFrom(ClickTrack.build()) }
                 .onSuccess { playback = it; it.play() }
-                .onFailure { playback = null }
-            return loopCount * ClickTrack.durationMs.toDouble()
+                .onFailure { playback = null; loadError = "节拍音重启失败" }
+            return base
         }
-        return loopCount * ClickTrack.durationMs.toDouble() + p.positionMs()
+        return loopCount.toDouble() * ClickTrack.durationMs + p.positionMs()
+    }
+
+    /**
+     * 音频后端起不来时的降级时钟 —— **至少画面能动**。
+     * 此时校准数值不可信，界面会提示。
+     */
+    private var fallbackStart = 0L
+    private fun fallbackNanos(): Double {
+        if (fallbackStart == 0L) fallbackStart = System.nanoTime()
+        return (System.nanoTime() - fallbackStart) / 1_000_000.0
     }
 
     override fun renderBackdrop(g: GuiGraphics) {
@@ -109,13 +126,11 @@ class CalibrationScreen(
         drawDrum(g)
         TexDraw.full(g, CALIB_FG_ZH, 0, 0, width, height, 1920, 1080)
         drawInfo(g, v)
+        drawManual(g)
         drawButtons(g)
         loadError?.let { g.drawString(font, it, 20, height - 20, 0xFFFF6666.toInt()) }
     }
 
-    /**
-     * OpenTaiko 的滚动带：每 500px 一组「小节线 + 咚音符」随 tick 左移。
-     */
     private fun drawScrollField(g: GuiGraphics, tick: Double) {
         val originX = (TaikoGameLayout.SCROLL_FIELD_X * scale).toInt()
         val originY = (TaikoGameLayout.SCROLL_FIELD_Y * scale).toInt()
@@ -169,6 +184,23 @@ class CalibrationScreen(
         g.drawString(font, "当前偏移   : ${currentOffset(v)} ms", x, y, 0xFF88FF88.toInt())
     }
 
+    /** 手动微调区（坠尔要求：能手动调目押/音押） */
+    private fun drawManual(g: GuiGraphics) {
+        val x = (TaikoGameLayout.JUDGE_X * scale).toInt()
+        val y = (TaikoGameLayout.JUDGE_Y * scale).toInt() + 96
+        val lh = 12
+        g.drawString(font, "── 手动微调 ──", x, y, 0xFFAAAAAA.toInt())
+        g.drawString(
+            font, "目押 ${manualVisual.toInt()} ms   , / .", x, y + lh,
+            0xFFFFD24A.toInt(),
+        )
+        g.drawString(
+            font, "音押 ${manualAudio.toInt()} ms   ; / '", x, y + lh * 2,
+            0xFF7FE87F.toInt(),
+        )
+        g.drawString(font, "Shift = ×5", x, y + lh * 3, 0xFF777777.toInt())
+    }
+
     private fun drawButtons(g: GuiGraphics) {
         val labels = arrayOf("取消", "打点", "保存")
         val baseY = height - 54
@@ -187,6 +219,16 @@ class CalibrationScreen(
     }
 
     override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
+        val step = if ((modifiers and 1) != 0) 25.0 else 5.0 // Shift = ×5
+
+        // 手动微调：, / . 目押，; / ' 音押
+        when (keyCode) {
+            44 -> { manualVisual -= step; return true }   // ,
+            46 -> { manualVisual += step; return true }   // .
+            59 -> { manualAudio -= step; return true }    // ;
+            39 -> { manualAudio += step; return true }    // '
+        }
+
         for (hit in KeyInputBuffer.drain()) {
             @Suppress("UNUSED_EXPRESSION") hit.color
             addOffset()
@@ -205,14 +247,12 @@ class CalibrationScreen(
             0 -> minecraft?.setScreen(previous)
             1 -> addOffset()
             2 -> {
-                if (offsets.isNotEmpty()) {
+                // 有采样用中位数（取负作为音押），否则保留手动值
+                val rec = if (offsets.isNotEmpty()) {
                     val sorted = offsets.sorted()
-                    // OpenTaiko: nGlobalOffsetMs = GetMedianOffset()
-                    // 游戏内 chartTimeJudgeMs = songPos + tjaOffset - audioOffset
-                    // 校准得到的是「玩家比音符晚多少」，所以要取负作为音押偏移
-                    val rec = -sorted[sorted.size / 2].toDouble()
-                    TaikoCraftClient.setOffsets(TaikoCraftClient.visualOffsetMs, rec)
-                }
+                    -sorted[sorted.size / 2].toDouble()
+                } else manualAudio
+                TaikoCraftClient.setOffsets(manualVisual, rec)
                 onApplied()
                 minecraft?.setScreen(previous)
             }

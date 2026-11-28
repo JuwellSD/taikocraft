@@ -47,6 +47,11 @@ class TaikoCraftClient(modEventBus: IEventBus) {
             saveSettings()
         }
 
+        fun setNoteStyle(style: NoteStyle) {
+            NoteStyleManager.current = style
+            saveSettings()
+        }
+
         private fun loadSettings() {
             val path = SongLibrary.settingsFile()
             if (!Files.exists(path)) return
@@ -63,6 +68,8 @@ class TaikoCraftClient(modEventBus: IEventBus) {
                     p.getProperty("key.rightDon")?.toIntOrNull() ?: 74,
                     p.getProperty("key.rightKa")?.toIntOrNull() ?: 75,
                 )
+                NoteStyleManager.current = NoteStyle
+                    .fromName(p.getProperty("noteStyle"))
                 TaikoCraft.LOGGER.info("设置已加载：目押 {} 音押 {}", visualOffsetMs, audioOffsetMs)
             }.onFailure { TaikoCraft.LOGGER.warn("读取设置失败：{}", it.message) }
         }
@@ -79,6 +86,7 @@ class TaikoCraftClient(modEventBus: IEventBus) {
                 p.setProperty("key.leftKa", TaikoKeyConfig.mapping.leftKa.toString())
                 p.setProperty("key.rightDon", TaikoKeyConfig.mapping.rightDon.toString())
                 p.setProperty("key.rightKa", TaikoKeyConfig.mapping.rightKa.toString())
+                p.setProperty("noteStyle", NoteStyleManager.current.name)
                 Files.newOutputStream(path).use { p.store(it, "TaikoCraft settings") }
             }.onFailure { TaikoCraft.LOGGER.warn("保存设置失败：{}", it.message) }
         }
