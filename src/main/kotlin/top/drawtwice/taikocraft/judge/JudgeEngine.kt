@@ -44,20 +44,21 @@ class JudgeEngine(
 
         tryCompleteBig(event)?.let { return it }
 
+        // 连打：加分但**不加连击**（太鼓原版：连打不计入 combo）
         rolls.firstOrNull { event.timeMs in it.startMs..it.endMs }?.let { roll ->
             score += if (roll.big) 200 else 100
-            combo++; maxCombo = maxOf(maxCombo, combo)
             return JudgeResult(
                 Judgment.PERFECT, null, event.color, roll.big, fromRollOrBalloon = true,
                 side = event.side, player = roll.player,
             )
         }
 
+        // 气球：加分但**不加连击**
         balloons.firstOrNull { event.timeMs in it.startMs..it.endMs }?.let { b ->
             val idx = balloons.indexOf(b)
             if (idx >= 0 && balloonHits[idx] < b.requiredHits) {
                 balloonHits[idx]++
-                score += 100; combo++; maxCombo = maxOf(maxCombo, combo)
+                score += 100
                 return JudgeResult(
                     Judgment.PERFECT, null, NoteColor.DON, false, fromRollOrBalloon = true,
                     balloonHits = balloonHits[idx], balloonRequired = b.requiredHits,
