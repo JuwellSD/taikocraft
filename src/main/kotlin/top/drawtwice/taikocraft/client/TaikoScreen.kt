@@ -443,14 +443,10 @@ class TaikoScreen(
             if (p.player != player) continue
             val age = (now - p.atNanos) / 1_000_000.0
             if (age < 0 || age > PAD_FADE_MS) continue
-            // 用「先保持、后渐隐」的曲线：前 15% 满亮，之后按平方衰减
-            // 线性 1-t 在人眼里前段几乎看不出变化，看起来像突然消失
-            val t = (age / PAD_FADE_MS).coerceIn(0.0, 1.0)
-            val level = if (t < 0.15) 1.0
-            else {
-                val u = (t - 0.15) / 0.85
-                (1.0 - u) * (1.0 - u)
-            }
+            // 坠尔要求：**亮起的第一刻就开始减不透明度**，0.5 秒内完全消失。
+            // 之前写了「前 15% 保持满亮」，在 200fps 下是 16 帧毫无变化，
+            // 视觉上就是「亮很久然后突然没了」—— 正好是坠尔看到的错误效果。
+            val level = (1.0 - age / PAD_FADE_MS).coerceIn(0.0, 1.0)
             // 0 左咔 / 1 右咔 / 2 左咚 / 3 右咚
             val idx = when {
                 p.color == NoteColor.KA && p.side == Side.LEFT -> 0
@@ -458,6 +454,7 @@ class TaikoScreen(
                 p.side == Side.LEFT -> 2
                 else -> 3
             }
+            // 同一区域多次按键取最亮的那个 —— 后按的自然覆盖前面的
             if (level > bright[idx]) bright[idx] = level.toFloat()
         }
 
@@ -512,8 +509,8 @@ class TaikoScreen(
     }
 
     private companion object {
-        /** 平面太鼓渐隐时长（毫秒） */
-        const val PAD_FADE_MS = 550.0
+        /** 平面太鼓渐隐时长（毫秒）—— 坠尔要求 0.5 秒内完全消失 */
+        const val PAD_FADE_MS = 500.0
     }
 
     // ================= 判定文字 / 调试 =================
