@@ -72,7 +72,7 @@ class PlaySession(
     private val _hitFx = mutableListOf<HitFx>()
     val hitFx: List<HitFx> get() = _hitFx
 
-    /** 最近 400ms 内的实际按键，供平面太鼓渐隐高亮 */
+    /** 最近 700ms 内的实际按键，供平面太鼓渐隐高亮 */
     private val _padPresses = mutableListOf<PadPress>()
     val padPresses: List<PadPress> get() = _padPresses
 
@@ -166,9 +166,10 @@ class PlaySession(
         val cutoff = clock.chartTimeJudgeMs - 1000.0
         _hitFx.removeAll { it.startMs < cutoff }
 
-        // 平面太鼓渐隐：清掉 400ms 前的按键记录
+        // 平面太鼓渐隐：清理时间必须 ≥ TaikoScreen.PAD_FADE_MS（550ms），
+        // 否则记录提前消失会让渐隐在 73% 处突然中断，看起来像「瞬间消失」。
         val nowNano = System.nanoTime()
-        _padPresses.removeAll { nowNano - it.atNanos > 400_000_000L }
+        _padPresses.removeAll { nowNano - it.atNanos > 700_000_000L }
     }
 
     private fun recordResult(r: JudgeResult, atMs: Double) {

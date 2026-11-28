@@ -46,7 +46,6 @@ class CalibrationScreen(
     private var loadError: String? = null
 
     private val offsets = mutableListOf<Int>()
-    private var lastOffset = 0
     private var buttonIndex = 1
 
     /** 手动微调的**工作副本**（保存时才写入 settings） */
@@ -221,8 +220,12 @@ class CalibrationScreen(
 
     override fun keyPressed(keyCode: Int, scanCode: Int, modifiers: Int): Boolean {
         // GLFW 修饰键位：SHIFT=0x1, CONTROL=0x2, ALT=0x4, SUPER=0x8
-        // 默认 1ms 步进（坠尔说之前只能 20 倍率变化，说明 Shift 一直被误判为按下）
+        // 默认 1ms 步进，按住 Shift 才 10ms
         val step = if ((modifiers and 0x1) != 0) 10.0 else 1.0
+
+        // ★ 必须先消费掉按键缓冲，否则敲击键（D/F/J/K）会残留到下一次
+        //   任何 keyPressed 时被一次性消费，导致凭空多出采样。
+        val hits = KeyInputBuffer.drain()
 
         // 手动微调：, / . 目押，; / ' 音押
         when (keyCode) {
@@ -232,7 +235,8 @@ class CalibrationScreen(
             39 -> { manualAudio += step; return true }    // '
         }
 
-        for (hit in KeyInputBuffer.drain()) {
+        // 敲击键 → 采样（仅四键会被 Mixin 写进 buffer）
+        for (hit in hits) {
             @Suppress("UNUSED_EXPRESSION") hit.color
             addOffset()
         }
@@ -263,9 +267,7 @@ class CalibrationScreen(
     }
 
     private fun addOffset() {
-        val off = currentOffset(tickValue(nowMs()))
-        offsets += off
-        lastOffset = off
+        offsets += currentOffset(tickValue(nowMs()))
     }
 
     override fun isPauseScreen(): Boolean = false
