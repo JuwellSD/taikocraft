@@ -53,7 +53,20 @@ class OpenAlPlayback private constructor(
     val durationMs: Double
         get() = if (sampleRate <= 0) 0.0 else frameCount * 1000.0 / sampleRate
 
-    /** 当前播放位置（毫秒），单调递增 */
+    /**
+     * 当前**耳朵听到的**位置（毫秒），单调递增。
+     *
+     * ## ⚠️ 为什么不能直接用 enqueued 推算（2026-11-28 校准差 208ms 的根因）
+     * `AL_SAMPLE_OFFSET` 是「当前正在播的那块缓冲内的偏移」，
+     * 但 OpenAL 的 source 队列里还排着 [BUFFER_COUNT] 块**尚未开始播**的数据。
+     * 之前用 `(enqueued − queued) + offset` 算出来的其实是
+     * 「已经交给声卡的数据量」，比耳朵听到的**早整整一个缓冲周期**。
+     *
+     * 坠尔实测：跟音乐打 −100ms、跟画面打 +40ms，差 140ms ≈ 一块 200ms 缓冲。
+     *
+     * 现在改用 `AL_SEC_OFFSET`（OpenAL 自己维护的已播时长，精确到秒），
+     * 这是**驱动实际播出去**的时间，天然包含缓冲延迟。
+     */
     fun positionMs(): Double {
         if (silent) {
             return if (paused) pausedPositionMs
@@ -61,6 +74,17 @@ class OpenAlPlayback private constructor(
         }
         if (destroyed || source == 0) return pausedPositionMs
 
+        // AL_SEC_OFFSET：当前 source 已播放的秒数（浮点），由驱动维护
+        val secOffset = AL10.alGetSourcef(source, AL11.AL_SEC_OFFSET)
+        if (secOffset.isFinite() && secOffset >= 0f) {
+            // 已播完并被回收的缓冲总时长 + 当前缓冲内的已播时长
+            val drainedFrames = (enqueuedSamples - queuedSizes.sumOf { it.toLong() }) / channels
+            val heard = (drainedFrames + secOffset.toDouble() * sampleRate)
+            val totalFrames = frameCount.toLong()
+            return heard.coerceIn(0.0, totalFrames.toDouble()) * 1000.0 / max(sampleRate, 1)
+        }
+
+        // 回退：老算法
         val offsetFrames = AL10.alGetSourcei(source, AL11.AL_SAMPLE_OFFSET).coerceAtLeast(0)
         val queuedInterleaved = queuedSizes.sumOf { it.toLong() }
         val playedInterleaved = (enqueuedSamples - queuedInterleaved).coerceAtLeast(0L)

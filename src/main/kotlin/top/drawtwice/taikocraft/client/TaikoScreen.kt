@@ -88,7 +88,7 @@ class TaikoScreen(
         noteOriginY1P = sx(TaikoGameLayout.SCROLL_FIELD_Y)
         noteOriginY2P = noteOriginY1P + sx(TaikoGameLayout.P2_DY)
         noteSize = sx(TaikoGameLayout.NOTES_SIZE)
-        interval = TaikoGameLayout.NOTES_INTERVAL * scale
+        interval = TaikoGameLayout.NOTES_INTERVAL * scale * TaikoGameLayout.SCROLL_MULTIPLIER
         laneX = sx(TaikoGameLayout.LANE_X)
         laneY1P = sx(TaikoGameLayout.LANE_Y)
         laneY2P = sx(TaikoGameLayout.LANE_Y + TaikoGameLayout.P2_DY)
@@ -375,7 +375,6 @@ class TaikoScreen(
         val oy = sx(TaikoGameLayout.TAIKO_Y + TaikoGameLayout.playerYOffset(player))
         val w = sx(180)
         val h = sx(200)
-        val halfW = w / 2
 
         TexDraw.full(g, TaikoGameTextures.drumBase, ox, oy, w, h, 180, 200)
 
@@ -405,15 +404,30 @@ class TaikoScreen(
         }
 
         // 鼓边（Ka）：区域 0 左、1 右
+        // 贴图已经按鼓面真实位置对齐（中心 91,83.5，半径 68×59.5），
+        // 直接整张贴、不用切半 —— 切半会把环裁到鼓身上（坠尔指出的"描边延续到鼓身"）。
+        // 左右区分靠 alpha：左半区只让 x < 中心的部分可见。
         for (i in 0..1) {
             val a = bright[i]
             if (a <= 0f) continue
             TexDraw.tinted(g, 1f, 1f, 1f, a) {
-                TexDraw.sub(
-                    g, TaikoGameTextures.drumKa,
-                    ox + i * halfW, oy, halfW, h,
-                    i * 90, 0, 90, 200, 180, 200,
-                )
+                val halfX = sx(91)   // 鼓面中心 x
+                if (i == 0) {
+                    // 左半：只画中心以左的部分
+                    val w0 = halfX
+                    TexDraw.sub(
+                        g, TaikoGameTextures.drumKa,
+                        ox, oy, w0, h,
+                        0, 0, 91, 200, 180, 200,
+                    )
+                } else {
+                    val w1 = w - halfX
+                    TexDraw.sub(
+                        g, TaikoGameTextures.drumKa,
+                        ox + halfX, oy, w1, h,
+                        91, 0, 89, 200, 180, 200,
+                    )
+                }
             }
         }
         // 鼓面（Don）：区域 2 左、3 右
@@ -421,11 +435,20 @@ class TaikoScreen(
             val a = bright[2 + i]
             if (a <= 0f) continue
             TexDraw.tinted(g, 1f, 1f, 1f, a) {
-                TexDraw.sub(
-                    g, TaikoGameTextures.drumDon,
-                    ox + i * halfW, oy, halfW, h,
-                    i * 90, 0, 90, 200, 180, 200,
-                )
+                val halfX = sx(91)
+                if (i == 0) {
+                    TexDraw.sub(
+                        g, TaikoGameTextures.drumDon,
+                        ox, oy, halfX, h,
+                        0, 0, 91, 200, 180, 200,
+                    )
+                } else {
+                    TexDraw.sub(
+                        g, TaikoGameTextures.drumDon,
+                        ox + halfX, oy, w - halfX, h,
+                        91, 0, 89, 200, 180, 200,
+                    )
+                }
             }
         }
     }

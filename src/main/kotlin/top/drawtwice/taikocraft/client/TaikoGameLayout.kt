@@ -51,6 +51,14 @@ object TaikoGameLayout {
     /** 4 拍 = 960px（Game_Notes_Interval） */
     const val NOTES_INTERVAL = 960
 
+    /**
+     * 音符速度倍率。
+     *
+     * OpenTaiko 的 `Game_Notes_Interval = 960` 对应 scroll speed 1.0。
+     * 坠尔实测我们这边偏慢，用 1.25 补偿（可随时再调）。
+     */
+    const val SCROLL_MULTIPLIER = 1.25
+
     /** 鼓面图（Game_Taiko_X/Y） */
     const val TAIKO_X = 303
     const val TAIKO_Y = 324
